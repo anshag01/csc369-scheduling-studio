@@ -9,6 +9,14 @@ const run = (algorithm: Algorithm, processes: ProcessDefinition[], quantum = 2, 
   simulate(processes, { algorithm, quantum, mlfqQuanta }).timeline.map((slice) => slice.processId ?? "-").join("");
 
 describe("scheduling simulator", () => {
+  const lectureExample = [
+    process("A", 0, 3, 0),
+    process("B", 2, 6, 1),
+    process("C", 4, 4, 2),
+    { ...process("D", 6, 5, 0), color: "#4" },
+    { ...process("E", 8, 2, 1), color: "#5" },
+  ];
+
   it("runs FCFS without preemption", () => {
     expect(run("fcfs", [process("A", 0, 3, 0), process("B", 1, 2, 1)])).toBe("AAABB");
   });
@@ -43,5 +51,25 @@ describe("scheduling simulator", () => {
     expect(final.processes.find((item) => item.id === "A")?.turnaroundTime).toBe(2);
     expect(final.processes.find((item) => item.id === "B")?.waitingTime).toBe(2);
     expect(final.processes.find((item) => item.id === "B")?.responseTime).toBe(2);
+  });
+
+  it("reproduces the lecture FCFS timeline and average wait of 4.6", () => {
+    const result = simulate(lectureExample, { algorithm: "fcfs", quantum: 2, mlfqQuanta: [1, 2, 4] });
+    expect(result.timeline.map((slice) => slice.processId).join("")).toBe("AAABBBBBBCCCCDDDDDEE");
+    const waits = result.snapshots.at(-1)!.processes.map((item) => item.waitingTime);
+    expect(waits.reduce((sum, wait) => sum + wait, 0) / waits.length).toBe(4.6);
+  });
+
+  it("reproduces the lecture SJF timeline and average wait of 3.6", () => {
+    const result = simulate(lectureExample, { algorithm: "sjf", quantum: 2, mlfqQuanta: [1, 2, 4] });
+    expect(result.timeline.map((slice) => slice.processId).join("")).toBe("AAABBBBBBEECCCCDDDDD");
+    const waits = result.snapshots.at(-1)!.processes.map((item) => item.waitingTime);
+    expect(waits.reduce((sum, wait) => sum + wait, 0) / waits.length).toBe(3.6);
+  });
+
+  it("reproduces the lecture Round Robin timeline and turnaround values", () => {
+    const result = simulate(lectureExample, { algorithm: "rr", quantum: 2, mlfqQuanta: [1, 2, 4] });
+    expect(result.timeline.map((slice) => slice.processId).join("")).toBe("AABBACCBBDDCCEEBBDDD");
+    expect(result.snapshots.at(-1)!.processes.map((item) => item.turnaroundTime)).toEqual([5, 15, 9, 14, 7]);
   });
 });

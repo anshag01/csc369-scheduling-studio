@@ -20,6 +20,29 @@ const algorithms: Record<Algorithm, { name: string; short: string; preemptive: b
   mlfq: { name: "Multilevel Feedback Queue", short: "MLFQ", preemptive: true },
 };
 
+const algorithmGuidance: Record<Algorithm, { rule: string; detail: string }> = {
+  fcfs: {
+    rule: "Run the head of the FIFO queue until it finishes.",
+    detail: "A running process is never displaced by a later arrival.",
+  },
+  sjf: {
+    rule: "When the CPU is free, choose the shortest ready job.",
+    detail: "This version is non-preemptive and uses the original service time.",
+  },
+  stcf: {
+    rule: "Keep the process with the shortest remaining time on the CPU.",
+    detail: "A strictly shorter arrival preempts the running process.",
+  },
+  rr: {
+    rule: "Run the queue head for one quantum, then rotate it to the tail.",
+    detail: "Lecture tie rule: a same-time arrival is enqueued before the expired process.",
+  },
+  mlfq: {
+    rule: "Always run the highest-priority non-empty queue.",
+    detail: "An unfinished process that uses its full quantum moves down one level.",
+  },
+};
+
 function wholeNumber(value: string, minimum: number) {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? Math.max(minimum, Math.floor(parsed)) : minimum;
@@ -96,13 +119,18 @@ export default function SchedulingLab() {
 
   const runningProcess = snapshot?.running ? processById.get(snapshot.running) : null;
   const completedCount = snapshot?.processes.filter((process) => process.state === "finished").length ?? 0;
+  const newCount = snapshot?.processes.filter((process) => process.state === "new").length ?? 0;
+  const readyCount = snapshot?.processes.filter((process) => process.state === "ready").length ?? 0;
 
   return (
     <main className="app-shell">
       <header className="topbar">
         <div className="brand-mark" aria-hidden="true"><span>CPU</span><span>LAB</span></div>
         <div className="brand-copy"><p className="eyebrow">CSC369 · Operating Systems</p><h1>Scheduling Studio</h1></div>
-        <div className="local-badge"><span className="status-dot" />Local simulation</div>
+        <div className="scope-badges">
+          <span>1 CPU</span><span>Discrete time</span>
+          <div className="local-badge"><span className="status-dot" />Browser-local</div>
+        </div>
       </header>
 
       <div className="workspace">
@@ -118,6 +146,11 @@ export default function SchedulingLab() {
             </select>
             {algorithm === "rr" && <div className="inline-setting"><label htmlFor="quantum">Time quantum</label><div className="number-with-unit"><input id="quantum" type="number" min="1" value={quantum} onChange={(event) => setQuantum(wholeNumber(event.target.value, 1))} /><span>ticks</span></div></div>}
             {algorithm === "mlfq" && <div className="mlfq-settings"><p className="field-label">Quantum per priority queue</p>{mlfqQuanta.map((value, index) => <label key={index}>Q{index}<input type="number" min="1" value={value} onChange={(event) => setMlfqQuanta((current) => current.map((item, itemIndex) => itemIndex === index ? wholeNumber(event.target.value, 1) : item))} /><span>ticks</span></label>)}</div>}
+            <div className="policy-note">
+              <span>{algorithms[algorithm].short} rule</span>
+              <strong>{algorithmGuidance[algorithm].rule}</strong>
+              <p>{algorithmGuidance[algorithm].detail}</p>
+            </div>
           </section>
 
           <section className="panel-section process-section">
@@ -143,24 +176,33 @@ export default function SchedulingLab() {
               <button className="play-button" onClick={() => { if (step >= lastStep) setStep(0); setPlaying((current) => !current); }} disabled={!snapshot} aria-label={playing ? "Pause simulation" : "Play simulation"}>{playing ? "Ⅱ" : "▶"}</button>
               <button onClick={() => setStep((current) => Math.min(lastStep, current + 1))} disabled={!snapshot || step === lastStep} aria-label="Next time step">→</button>
             </div>
-            <div className="time-readout"><span>TIME</span><strong>{snapshot?.time ?? "—"}</strong><span>/ {lastStep}</span></div>
+            <div className="time-readout"><span>TIME</span><strong data-testid="time-value">{snapshot?.time ?? "—"}</strong><span>/ {lastStep}</span></div>
             <label className="speed-control">Speed<select value={speed} onChange={(event) => setSpeed(Number(event.target.value))}><option value="1400">Slow</option><option value="800">Normal</option><option value="400">Fast</option></select></label>
             <div className="keyboard-hint"><kbd>←</kbd><kbd>→</kbd> step <kbd>space</kbd> play</div>
           </div>
 
           {!snapshot ? <div className="empty-state"><span>!</span><h2>Check the scenario</h2><p>{validationError}</p></div> : <>
+            <section className="state-flow" aria-label="Process lifecycle summary" data-testid="state-flow">
+              <div className="flow-node"><span>NEW</span><strong>{newCount}</strong><small>Not arrived</small></div>
+              <i aria-hidden="true">→</i>
+              <div className="flow-node ready-node"><span>READY</span><strong>{readyCount}</strong><small>In queue</small></div>
+              <i aria-hidden="true">→</i>
+              <div className={`flow-node running-node ${snapshot.running ? "active" : ""}`}><span>RUNNING</span><strong>{snapshot.running ?? "—"}</strong><small>On CPU</small></div>
+              <i aria-hidden="true">→</i>
+              <div className="flow-node finished-node"><span>FINISHED</span><strong>{completedCount}</strong><small>Exited</small></div>
+            </section>
             <div className="status-grid">
               <article className="cpu-card"><div className="card-label"><span className="live-dot" />CPU · RUNNING</div>
                 {runningProcess ? <div className="running-content"><div className="process-orb" style={{ background: runningProcess.color }}>{runningProcess.id}</div><div><p>Executing now</p><h2>Process {runningProcess.id}</h2><span>{snapshot.runningRemaining} tick{snapshot.runningRemaining === 1 ? "" : "s"} remaining{algorithm === "mlfq" ? ` · Q${snapshot.runningQueueLevel}` : ""}</span></div></div> : <div className="idle-content"><div className="process-orb idle">—</div><div><p>Nothing dispatched</p><h2>CPU idle</h2><span>Waiting for work</span></div></div>}
                 <div className="cpu-progress"><span style={{ width: runningProcess ? `${((runningProcess.serviceTime - (snapshot.runningRemaining ?? 0)) / runningProcess.serviceTime) * 100}%` : "0%", background: runningProcess?.color }} /></div>
               </article>
-              <article className="event-card"><div className="card-label">AT THIS TIME BOUNDARY</div><div className="event-list">{snapshot.events.length ? snapshot.events.map((event, index) => <p key={index}><span>{index + 1}</span>{event}</p>) : <p className="muted-event">No scheduling decision was needed.</p>}</div></article>
+              <article className="event-card"><div className="card-label">AT THIS TIME BOUNDARY</div><div className="event-list" data-testid="event-list">{snapshot.events.length ? snapshot.events.map((event, index) => <p key={index}><span>{index + 1}</span>{event}</p>) : <p className="muted-event">No scheduling decision was needed.</p>}</div></article>
             </div>
 
             <section className="queue-section card-surface"><div className="card-title-row"><div><p className="eyebrow">READY STATE</p><h2>{algorithm === "mlfq" ? "Priority queues" : "Ready queue"}</h2></div><span>{snapshot.readyQueues.flat().length} waiting</span></div>
               <div className={algorithm === "mlfq" ? "multi-queues" : "single-queue"}>{snapshot.readyQueues.map((queue, queueIndex) => <div className="queue-row" key={queueIndex}>
                 {algorithm === "mlfq" && <div className="queue-label"><strong>Q{queueIndex}</strong><span>{queueIndex === 0 ? "Highest" : queueIndex === snapshot.readyQueues.length - 1 ? "Lowest" : "Medium"} priority · q={mlfqQuanta[queueIndex]}</span></div>}
-                <div className="queue-track"><span className="queue-head">HEAD</span>{queue.length === 0 ? <span className="empty-queue">Queue empty</span> : queue.map((id, index) => { const process = processById.get(id)!; return <div className="queue-chip" key={`${id}-${index}`} style={{ "--process-color": process.color } as React.CSSProperties}><strong>{id}</strong><span>{snapshot.processes.find((item) => item.id === id)?.remainingTime} left</span></div>; })}<span className="queue-tail">TAIL</span></div>
+                <div className="queue-track" data-testid={`ready-queue-${queueIndex}`}><span className="queue-head">HEAD</span>{queue.length === 0 ? <span className="empty-queue">Queue empty</span> : queue.map((id, index) => { const process = processById.get(id)!; return <div className="queue-chip" key={`${id}-${index}`} style={{ "--process-color": process.color } as React.CSSProperties}><strong>{id}</strong><span>{snapshot.processes.find((item) => item.id === id)?.remainingTime} left</span></div>; })}<span className="queue-tail">TAIL</span></div>
               </div>)}</div>
             </section>
 
