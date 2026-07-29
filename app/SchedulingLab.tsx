@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Algorithm, ProcessDefinition, simulate, validateProcesses } from "../lib/simulator";
 
-const palette = ["#f06a47", "#6f7bf7", "#2fae8f", "#e6a23c", "#b76bd6", "#3f96d3"];
+const palette = ["#e85d4a", "#5b63d3", "#159a83", "#d38b24", "#965ac2", "#2783b8"];
 const exampleProcesses: ProcessDefinition[] = [
   { id: "A", arrivalTime: 0, serviceTime: 3, color: palette[0] },
   { id: "B", arrivalTime: 2, serviceTime: 6, color: palette[1] },
