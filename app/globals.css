@@ -7,8 +7,9 @@
   --paper: #f7f7f5;
   --panel: #fbfbfa;
   --navy: #202123;
-  --green: #10a37f;
-  --orange: #10a37f;
+  --accent: #4f6bed;
+  --green: var(--accent);
+  --orange: var(--accent);
   --indigo: #202123;
   --amber: #c58b2a;
   --soft: #f1f1ee;
@@ -19,11 +20,11 @@ html { background: var(--paper); }
 body { margin: 0; color: var(--ink); background: var(--paper); font-family: var(--font-manrope), Arial, sans-serif; }
 button, input, select, textarea { font: inherit; }
 button, select { cursor: pointer; }
-button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible, summary:focus-visible { outline: 3px solid rgba(16, 163, 127, .24); outline-offset: 2px; }
+button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible, summary:focus-visible { outline: 3px solid rgba(79, 107, 237, .24); outline-offset: 2px; }
 
 .app-shell { min-height: 100vh; }
-.topbar { position: relative; min-height: 86px; display: flex; align-items: center; gap: 18px; padding: 14px 28px; overflow: hidden; color: #fff; background: linear-gradient(115deg, #171717 0%, #242424 72%, #1f2926 125%); border-bottom: 1px solid #383838; box-shadow: 0 6px 20px rgba(0, 0, 0, .12); }
-.topbar::after { content: ""; position: absolute; inset: 0 0 0 auto; width: 45%; pointer-events: none; opacity: .38; background: radial-gradient(circle at 85% 15%, rgba(16, 163, 127, .18), transparent 42%), repeating-linear-gradient(115deg, transparent 0 22px, rgba(255,255,255,.045) 22px 23px); }
+.topbar { position: relative; min-height: 86px; display: flex; align-items: center; gap: 18px; padding: 14px 28px; overflow: hidden; color: #fff; background: linear-gradient(115deg, #171717 0%, #242424 72%, #222631 125%); border-bottom: 1px solid #383838; box-shadow: 0 6px 20px rgba(0, 0, 0, .12); }
+.topbar::after { content: ""; position: absolute; inset: 0 0 0 auto; width: 45%; pointer-events: none; opacity: .38; background: radial-gradient(circle at 85% 15%, rgba(79, 107, 237, .18), transparent 42%), repeating-linear-gradient(115deg, transparent 0 22px, rgba(255,255,255,.045) 22px 23px); }
 .brand-mark { width: 52px; height: 52px; display: grid; place-content: center; background: var(--green); font-family: var(--font-dm-mono), monospace; font-size: 12px; line-height: 1.05; font-weight: 500; letter-spacing: .12em; text-align: center; transform: rotate(-2deg); box-shadow: 4px 4px 0 rgba(0, 0, 0, .3); }
 .brand-mark span { display: block; }
 .brand-copy h1 { margin: 2px 0 0; font-size: 24px; letter-spacing: -.035em; }
@@ -32,7 +33,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .scope-badges { position: relative; z-index: 1; margin-left: auto; display: flex; align-items: center; gap: 8px; }
 .scope-badges > span { padding: 7px 10px; color: #c7c7c2; background: rgba(255,255,255,.035); border: 1px solid rgba(255,255,255,.13); border-radius: 999px; font: 9px var(--font-dm-mono), monospace; text-transform: uppercase; letter-spacing: .05em; }
 .local-badge { display: flex; align-items: center; gap: 8px; padding: 8px 12px; background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.16); border-radius: 999px; color: #e5e5e1; font-size: 11px; }
-.status-dot, .live-dot { width: 7px; height: 7px; display: inline-block; border-radius: 50%; background: #19c69a; box-shadow: 0 0 0 4px rgba(25,198,154,.12); }
+.status-dot, .live-dot { width: 7px; height: 7px; display: inline-block; border-radius: 50%; background: #6f8cff; box-shadow: 0 0 0 4px rgba(111,140,255,.12); }
 
 .workspace { display: grid; grid-template-columns: 360px minmax(0, 1fr); min-height: calc(100vh - 130px); }
 .setup-panel { background: linear-gradient(180deg, #fdfdfc 0%, #f7f7f4 100%); border-right: 1px solid var(--line); }
@@ -43,7 +44,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .step-number { font: 500 10px var(--font-dm-mono), monospace; color: var(--orange); }
 .policy-badge { padding: 5px 8px; border-radius: 4px; font: 500 9px var(--font-dm-mono), monospace; text-transform: uppercase; letter-spacing: .06em; }
 .policy-badge.preemptive { color: #77551b; background: #f7edd8; }
-.policy-badge.non-preemptive { color: #08735a; background: #e1f3ed; }
+.policy-badge.non-preemptive { color: #3d53b8; background: #e8ecff; }
 .field-label { display: block; margin: 0 0 7px; color: var(--muted); font-size: 11px; font-weight: 700; }
 select, input, textarea { color: var(--ink); background: #fff; border: 1px solid #d8d8d4; border-radius: 6px; box-shadow: 0 1px 2px rgba(0, 0, 0, .025); }
 select:hover, input:hover, textarea:hover { border-color: #bdbdb8; }
@@ -56,7 +57,7 @@ input { min-width: 0; padding: 8px 9px; }
 .mlfq-settings { margin-top: 14px; padding-top: 14px; border-top: 1px dashed var(--line); }
 .mlfq-settings label { display: grid; grid-template-columns: 28px 1fr 36px; align-items: center; gap: 7px; margin-top: 7px; color: var(--muted); font: 11px var(--font-dm-mono), monospace; }
 .mlfq-settings input { width: 100%; padding: 6px 8px; }
-.policy-note { position: relative; margin-top: 16px; padding: 13px 14px 13px 16px; overflow: hidden; background: linear-gradient(135deg, #fff 0%, #eef7f3 100%); border: 1px solid #d7e8e1; border-radius: 7px; }
+.policy-note { position: relative; margin-top: 16px; padding: 13px 14px 13px 16px; overflow: hidden; background: linear-gradient(135deg, #fff 0%, #f0f2ff 100%); border: 1px solid #dfe3f5; border-radius: 7px; }
 .policy-note::before { content: ""; position: absolute; inset: 0 auto 0 0; width: 3px; background: var(--orange); }
 .policy-note > span { display: block; margin-bottom: 5px; color: var(--orange); font: 500 8px var(--font-dm-mono), monospace; text-transform: uppercase; letter-spacing: .1em; }
 .policy-note strong { display: block; font-size: 11px; line-height: 1.45; }
@@ -73,7 +74,7 @@ input { min-width: 0; padding: 8px 9px; }
 .remove-button { height: 30px; padding: 0; color: #9ba1a8; background: transparent; border: 0; font-size: 20px; }
 .remove-button:hover { color: #d84f45; }
 .add-button { width: 100%; margin-top: 10px; padding: 9px; color: #595954; background: rgba(255,255,255,.52); border: 1px dashed #c4c4bf; border-radius: 6px; font-size: 11px; font-weight: 700; }
-.add-button:hover { color: #08735a; background: #edf7f3; border-color: #89bbae; }
+.add-button:hover { color: #3d53b8; background: #eef1ff; border-color: #a9b4ed; }
 .add-button span { margin-right: 5px; color: var(--orange); }
 .validation-message { margin: 9px 0 0; color: #b23b34; font-size: 11px; }
 .json-panel { margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--line); }
@@ -126,7 +127,7 @@ kbd { padding: 2px 4px; color: #5d5d58; background: #f1f1ee; border: 1px solid #
 .event-card { min-height: 172px; padding: 18px 20px; }
 .event-list { display: grid; gap: 8px; margin-top: 15px; }
 .event-list p { display: flex; align-items: flex-start; gap: 9px; margin: 0; color: #4d5863; font-size: 11px; line-height: 1.4; }
-.event-list p > span { width: 18px; height: 18px; flex: 0 0 auto; display: grid; place-items: center; color: #fff; background: var(--green); border-radius: 50%; box-shadow: 0 2px 6px rgba(16,163,127,.18); font: 9px var(--font-dm-mono), monospace; }
+.event-list p > span { width: 18px; height: 18px; flex: 0 0 auto; display: grid; place-items: center; color: #fff; background: var(--accent); border-radius: 50%; box-shadow: 0 2px 6px rgba(79,107,237,.18); font: 9px var(--font-dm-mono), monospace; }
 .event-list .muted-event { color: #949ba2; }
 
 .card-surface { margin-top: 16px; padding: 19px 20px; }
@@ -169,7 +170,7 @@ td { padding: 9px 10px; border-bottom: 1px solid #e8e8e4; color: #565651; }
 td:first-child { color: var(--ink); font: 500 11px var(--font-dm-mono), monospace; }
 td:first-child i { margin-right: 7px; }
 .state-pill { padding: 3px 6px; border-radius: 999px; font: 8px var(--font-dm-mono), monospace; text-transform: uppercase; }
-.state-pill.running { color: #08715a; background: #ddf3ec; }
+.state-pill.running { color: #3d53b8; background: #e7ebff; }
 .state-pill.ready { color: #75551d; background: #f6ecd8; }
 .state-pill.finished { color: #555550; background: #e9e9e6; }
 .state-pill.new { color: #5f5f59; background: #f0f0ed; }
