@@ -101,7 +101,6 @@ function makeViews(
   processes: RuntimeProcess[],
   queues: RuntimeProcess[][],
   running: RuntimeProcess | null,
-  time: number,
 ): ProcessView[] {
   const readyIds = new Set(queues.flat().map((process) => process.id));
   return processes.map((process) => {
@@ -254,7 +253,7 @@ export function simulate(
       running: running?.id ?? null,
       readyQueues: queues.map((queue) => queue.map((process) => process.id)),
       events,
-      processes: makeViews(processes, queues, running, time),
+      processes: makeViews(processes, queues, running),
       runningRemaining: running?.remainingTime ?? null,
       runningQueueLevel: running?.queueLevel ?? null,
     });

@@ -68,11 +68,13 @@ export default function SchedulingLab() {
   const snapshot = result.snapshots[Math.min(step, lastStep)];
   const processById = useMemo(() => new Map(processes.map((process) => [process.id, process])), [processes]);
 
-  useEffect(() => { setStep(0); setPlaying(false); }, [algorithm, mlfqQuanta, processes, quantum]);
   useEffect(() => {
-    if (!playing) return;
-    if (step >= lastStep) { setPlaying(false); return; }
-    const timer = window.setTimeout(() => setStep((current) => current + 1), speed);
+    if (!playing || step >= lastStep) return;
+    const timer = window.setTimeout(() => {
+      const nextStep = Math.min(lastStep, step + 1);
+      setStep(nextStep);
+      if (nextStep >= lastStep) setPlaying(false);
+    }, speed);
     return () => window.clearTimeout(timer);
   }, [lastStep, playing, speed, step]);
   useEffect(() => {
@@ -87,10 +89,13 @@ export default function SchedulingLab() {
     return () => window.removeEventListener("keydown", handleKey);
   }, [lastStep]);
 
-  const updateProcess = (index: number, patch: Partial<ProcessDefinition>) => setProcesses((current) =>
-    current.map((process, processIndex) => processIndex === index ? { ...process, ...patch } : process),
-  );
+  const resetPlayback = () => { setStep(0); setPlaying(false); };
+  const updateProcess = (index: number, patch: Partial<ProcessDefinition>) => {
+    resetPlayback();
+    setProcesses((current) => current.map((process, processIndex) => processIndex === index ? { ...process, ...patch } : process));
+  };
   const addProcess = () => {
+    resetPlayback();
     const used = new Set(processes.map((process) => process.id));
     const id = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("").find((candidate) => !used.has(candidate)) ?? `P${processes.length + 1}`;
     setProcesses((current) => [...current, {
@@ -100,7 +105,7 @@ export default function SchedulingLab() {
       color: palette[current.length % palette.length],
     }]);
   };
-  const loadExample = () => setProcesses(exampleProcesses.map((process) => ({ ...process })));
+  const loadExample = () => { resetPlayback(); setProcesses(exampleProcesses.map((process) => ({ ...process }))); };
   const prepareJson = () => { setJsonText(JSON.stringify({ processes }, null, 2)); setJsonMessage("Scenario copied into the editor."); };
   const importJson = () => {
     try {
@@ -113,7 +118,7 @@ export default function SchedulingLab() {
       }));
       const error = validateProcesses(next);
       if (error) throw new Error(error);
-      setProcesses(next); setJsonMessage(`Loaded ${next.length} processes.`);
+      resetPlayback(); setProcesses(next); setJsonMessage(`Loaded ${next.length} processes.`);
     } catch (error) { setJsonMessage(error instanceof Error ? error.message : "Could not read this scenario."); }
   };
 
@@ -141,11 +146,11 @@ export default function SchedulingLab() {
               <span className={`policy-badge ${algorithms[algorithm].preemptive ? "preemptive" : "non-preemptive"}`}>{algorithms[algorithm].preemptive ? "Preemptive" : "Non-preemptive"}</span>
             </div>
             <label className="field-label" htmlFor="algorithm">Scheduling algorithm</label>
-            <select id="algorithm" value={algorithm} onChange={(event) => setAlgorithm(event.target.value as Algorithm)}>
+            <select id="algorithm" value={algorithm} onChange={(event) => { resetPlayback(); setAlgorithm(event.target.value as Algorithm); }}>
               {(Object.keys(algorithms) as Algorithm[]).map((key) => <option key={key} value={key}>{algorithms[key].short} — {algorithms[key].name}</option>)}
             </select>
-            {algorithm === "rr" && <div className="inline-setting"><label htmlFor="quantum">Time quantum</label><div className="number-with-unit"><input id="quantum" type="number" min="1" value={quantum} onChange={(event) => setQuantum(wholeNumber(event.target.value, 1))} /><span>ticks</span></div></div>}
-            {algorithm === "mlfq" && <div className="mlfq-settings"><p className="field-label">Quantum per priority queue</p>{mlfqQuanta.map((value, index) => <label key={index}>Q{index}<input type="number" min="1" value={value} onChange={(event) => setMlfqQuanta((current) => current.map((item, itemIndex) => itemIndex === index ? wholeNumber(event.target.value, 1) : item))} /><span>ticks</span></label>)}</div>}
+            {algorithm === "rr" && <div className="inline-setting"><label htmlFor="quantum">Time quantum</label><div className="number-with-unit"><input id="quantum" type="number" min="1" value={quantum} onChange={(event) => { resetPlayback(); setQuantum(wholeNumber(event.target.value, 1)); }} /><span>ticks</span></div></div>}
+            {algorithm === "mlfq" && <div className="mlfq-settings"><p className="field-label">Quantum per priority queue</p>{mlfqQuanta.map((value, index) => <label key={index}>Q{index}<input type="number" min="1" value={value} onChange={(event) => { resetPlayback(); setMlfqQuanta((current) => current.map((item, itemIndex) => itemIndex === index ? wholeNumber(event.target.value, 1) : item)); }} /><span>ticks</span></label>)}</div>}
             <div className="policy-note">
               <span>{algorithms[algorithm].short} rule</span>
               <strong>{algorithmGuidance[algorithm].rule}</strong>
@@ -160,7 +165,7 @@ export default function SchedulingLab() {
               <label className="process-id-input"><span style={{ background: process.color }} /><input aria-label={`Process ${index + 1} ID`} maxLength={6} value={process.id} onChange={(event) => updateProcess(index, { id: event.target.value.toUpperCase() })} /></label>
               <input aria-label={`${process.id} arrival time`} type="number" min="0" value={process.arrivalTime} onChange={(event) => updateProcess(index, { arrivalTime: wholeNumber(event.target.value, 0) })} />
               <input aria-label={`${process.id} service time`} type="number" min="1" value={process.serviceTime} onChange={(event) => updateProcess(index, { serviceTime: wholeNumber(event.target.value, 1) })} />
-              <button aria-label={`Remove ${process.id}`} className="remove-button" onClick={() => setProcesses((current) => current.filter((_, processIndex) => processIndex !== index))}>×</button>
+              <button aria-label={`Remove ${process.id}`} className="remove-button" onClick={() => { resetPlayback(); setProcesses((current) => current.filter((_, processIndex) => processIndex !== index)); }}>×</button>
             </div>)}</div>
             <button className="add-button" onClick={addProcess}><span>＋</span>Add process</button>
             {validationError && <p className="validation-message" role="alert">{validationError}</p>}
@@ -191,6 +196,7 @@ export default function SchedulingLab() {
               <i aria-hidden="true">→</i>
               <div className="flow-node finished-node"><span>FINISHED</span><strong>{completedCount}</strong><small>Exited</small></div>
             </section>
+            <div className={`dashboard-grid ${algorithm === "mlfq" ? "mlfq-dashboard" : ""}`}>
             <div className="status-grid">
               <article className="cpu-card"><div className="card-label"><span className="live-dot" />CPU · RUNNING</div>
                 {runningProcess ? <div className="running-content"><div className="process-orb" style={{ background: runningProcess.color }}>{runningProcess.id}</div><div><p>Executing now</p><h2>Process {runningProcess.id}</h2><span>{snapshot.runningRemaining} tick{snapshot.runningRemaining === 1 ? "" : "s"} remaining{algorithm === "mlfq" ? ` · Q${snapshot.runningQueueLevel}` : ""}</span></div></div> : <div className="idle-content"><div className="process-orb idle">—</div><div><p>Nothing dispatched</p><h2>CPU idle</h2><span>Waiting for work</span></div></div>}
@@ -212,10 +218,10 @@ export default function SchedulingLab() {
             </section>
 
             <section className="metrics-section card-surface"><div className="card-title-row"><div><p className="eyebrow">PROCESS ACCOUNTING</p><h2>State & metrics</h2></div><span>{completedCount}/{processes.length} complete</span></div><div className="metrics-scroll"><table><thead><tr><th>Process</th><th>State</th><th>Remaining</th><th>Waiting</th><th>Response</th><th>Turnaround</th></tr></thead><tbody>{snapshot.processes.map((process) => <tr key={process.id}><td><i style={{ background: process.color }} />{process.id}</td><td><span className={`state-pill ${process.state}`}>{process.state}</span></td><td>{process.remainingTime}</td><td>{process.waitingTime}</td><td>{process.responseTime ?? "—"}</td><td>{process.turnaroundTime ?? "—"}</td></tr>)}</tbody></table></div></section>
+            </div>
           </>}
         </section>
       </div>
-      <footer><span>All simulation state stays in this browser.</span><span>Single CPU · Discrete time · CSC369 lecture rules</span></footer>
     </main>
   );
 }
