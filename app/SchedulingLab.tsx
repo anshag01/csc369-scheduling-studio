@@ -48,6 +48,12 @@ function wholeNumber(value: string, minimum: number) {
   return Number.isFinite(parsed) ? Math.max(minimum, Math.floor(parsed)) : minimum;
 }
 
+function mean(values: number[]) {
+  if (values.length === 0) return "—";
+  const value = values.reduce((sum, item) => sum + item, 0) / values.length;
+  return Number.isInteger(value) ? String(value) : value.toFixed(1);
+}
+
 export default function SchedulingLab() {
   const [processes, setProcesses] = useState<ProcessDefinition[]>(exampleProcesses);
   const [algorithm, setAlgorithm] = useState<Algorithm>("rr");
@@ -130,6 +136,15 @@ export default function SchedulingLab() {
   const completedCount = snapshot?.processes.filter((process) => process.state === "finished").length ?? 0;
   const newCount = snapshot?.processes.filter((process) => process.state === "new").length ?? 0;
   const readyCount = snapshot?.processes.filter((process) => process.state === "ready").length ?? 0;
+  const boostTicksRemaining = snapshot
+    ? mlfqBoostInterval - (snapshot.time % mlfqBoostInterval)
+    : mlfqBoostInterval;
+  const boostProgress = snapshot
+    ? (snapshot.time % mlfqBoostInterval) / mlfqBoostInterval * 100
+    : 0;
+  const averageWaiting = mean(snapshot?.processes.map((process) => process.waitingTime) ?? []);
+  const averageResponse = mean(snapshot?.processes.flatMap((process) => process.responseTime === null ? [] : [process.responseTime]) ?? []);
+  const averageTurnaround = mean(snapshot?.processes.flatMap((process) => process.turnaroundTime === null ? [] : [process.turnaroundTime]) ?? []);
 
   return (
     <main className="app-shell">
@@ -137,7 +152,7 @@ export default function SchedulingLab() {
         <div className="brand-mark" aria-hidden="true"><span>CPU</span><span>LAB</span></div>
         <div className="brand-copy"><p className="eyebrow">CSC369 · Operating Systems</p><h1>Scheduling Studio</h1></div>
         <div className="scope-badges">
-          <span>1 CPU</span><span>Discrete time</span>
+          <span>1 CPU</span><span>Discrete time</span><span>CPU bursts only</span>
           <div className="local-badge"><span className="status-dot" />Browser-local</div>
         </div>
       </header>
@@ -208,17 +223,20 @@ export default function SchedulingLab() {
             <div className={`dashboard-grid ${algorithm === "mlfq" ? "mlfq-dashboard" : ""}`}>
             <div className="status-grid">
               <article className="cpu-card"><div className="card-label"><span className="live-dot" />CPU · RUNNING</div>
-                {runningProcess ? <div className="running-content"><div className="process-orb" style={{ background: runningProcess.color }}>{runningProcess.id}</div><div><p>Executing now</p><h2>Process {runningProcess.id}</h2><span>{snapshot.runningRemaining} tick{snapshot.runningRemaining === 1 ? "" : "s"} remaining{algorithm === "mlfq" && runningView ? ` · Q${runningView.queueLevel} · ${runningView.allotmentUsed}/${mlfqQuanta[runningView.queueLevel]} used` : ""}</span></div></div> : <div className="idle-content"><div className="process-orb idle">—</div><div><p>Nothing dispatched</p><h2>CPU idle</h2><span>Waiting for work</span></div></div>}
+                {runningProcess ? <div className="running-content"><div className="process-orb" style={{ background: runningProcess.color }}>{runningProcess.id}</div><div><p>Executing now</p><h2>Process {runningProcess.id}</h2><span>{snapshot.runningRemaining} tick{snapshot.runningRemaining === 1 ? "" : "s"} remaining{algorithm === "mlfq" && runningView ? ` · Q${runningView.queueLevel} · ${runningView.allotmentUsed}/${mlfqQuanta[runningView.queueLevel]} used` : ""}</span>{algorithm === "mlfq" && runningView && <div className="running-allotment" title={`${runningView.allotmentUsed} of ${mlfqQuanta[runningView.queueLevel]} allotted ticks used`}><i style={{ width: `${runningView.allotmentUsed / mlfqQuanta[runningView.queueLevel] * 100}%` }} /><small>demote at {mlfqQuanta[runningView.queueLevel]}</small></div>}</div></div> : <div className="idle-content"><div className="process-orb idle">—</div><div><p>Nothing dispatched</p><h2>CPU idle</h2><span>Waiting for work</span></div></div>}
                 <div className="cpu-progress"><span style={{ width: runningProcess ? `${((runningProcess.serviceTime - (snapshot.runningRemaining ?? 0)) / runningProcess.serviceTime) * 100}%` : "0%", background: runningProcess?.color }} /></div>
               </article>
               <article className="event-card"><div className="card-label">AT THIS TIME BOUNDARY</div><div className="event-list" data-testid="event-list">{snapshot.events.length ? snapshot.events.map((event, index) => <p key={index}><span>{index + 1}</span>{event}</p>) : <p className="muted-event">No scheduling decision was needed.</p>}</div></article>
             </div>
 
-            <section className="queue-section card-surface"><div className="card-title-row"><div><p className="eyebrow">READY STATE</p><h2>{algorithm === "mlfq" ? "Priority queues" : "Ready queue"}</h2></div><span>{snapshot.readyQueues.flat().length} waiting</span></div>
-              <div className={algorithm === "mlfq" ? "multi-queues" : "single-queue"}>{snapshot.readyQueues.map((queue, queueIndex) => <div className="queue-row" key={queueIndex}>
-                {algorithm === "mlfq" && <div className="queue-label"><strong>Q{queueIndex}</strong><span>{queueIndex === 0 ? "Highest" : queueIndex === snapshot.readyQueues.length - 1 ? "Lowest" : "Medium"} · allotment {mlfqQuanta[queueIndex]}</span></div>}
-                <div className="queue-track" data-testid={`ready-queue-${queueIndex}`}><span className="queue-head">HEAD</span>{queue.length === 0 ? <span className="empty-queue">Queue empty</span> : queue.map((id, index) => { const process = processById.get(id)!; const view = snapshot.processes.find((item) => item.id === id); return <div className={`queue-chip ${algorithm === "mlfq" ? "mlfq-queue-chip" : ""}`} key={`${id}-${index}`} style={{ "--process-color": process.color } as React.CSSProperties}><strong>{id}</strong><span>{view?.remainingTime} left{algorithm === "mlfq" ? ` · ${view?.allotmentUsed}/${mlfqQuanta[queueIndex]} used` : ""}</span></div>; })}<span className="queue-tail">TAIL</span></div>
-              </div>)}</div>
+            <section className="queue-section card-surface"><div className="card-title-row"><div><p className="eyebrow">READY STATE</p><h2>{algorithm === "mlfq" ? "Priority feedback map" : "Ready queue"}</h2></div><div className="queue-summary"><span>{snapshot.readyQueues.flat().length} waiting</span>{algorithm === "mlfq" && <div className="boost-countdown" title={`All active processes return to Q0 in ${boostTicksRemaining} ticks`}><i className="boost-ring" style={{ "--boost-progress": `${boostProgress}%` } as React.CSSProperties}><b>{boostTicksRemaining}</b></i><span><strong>NEXT BOOST</strong><small>ticks remaining</small></span></div>}</div></div>
+              <div className={algorithm === "mlfq" ? "multi-queues" : "single-queue"}>{snapshot.readyQueues.map((queue, queueIndex) => {
+                const isRunningLevel = algorithm === "mlfq" && snapshot.runningQueueLevel === queueIndex;
+                return <div className={`queue-row ${isRunningLevel ? "active-queue" : ""}`} key={queueIndex}>
+                  {algorithm === "mlfq" && <div className="queue-label"><div><strong>Q{queueIndex}</strong>{isRunningLevel && <em>{snapshot.running} ON CPU</em>}</div><span>{queueIndex === 0 ? "Highest" : queueIndex === snapshot.readyQueues.length - 1 ? "Lowest" : "Medium"} · allotment {mlfqQuanta[queueIndex]}</span>{queueIndex < snapshot.readyQueues.length - 1 && <i className="demotion-cue">full allotment ↓</i>}</div>}
+                  <div className="queue-track" data-testid={`ready-queue-${queueIndex}`}><span className="queue-head">HEAD</span>{queue.length === 0 ? <span className="empty-queue">Queue empty</span> : queue.map((id, index) => { const process = processById.get(id)!; const view = snapshot.processes.find((item) => item.id === id); const allotted = mlfqQuanta[queueIndex]; const used = view?.allotmentUsed ?? 0; return <div className={`queue-chip ${algorithm === "mlfq" ? "mlfq-queue-chip" : ""}`} key={`${id}-${index}`} style={{ "--process-color": process.color } as React.CSSProperties} title={algorithm === "mlfq" ? `${id}: ${used} of ${allotted} ticks used at Q${queueIndex}` : undefined}><strong>{id}</strong><span>{view?.remainingTime} left{algorithm === "mlfq" ? ` · ${used}/${allotted} used` : ""}</span>{algorithm === "mlfq" && <i className="allotment-meter" aria-hidden="true"><b style={{ width: `${used / allotted * 100}%` }} /></i>}</div>; })}<span className="queue-tail">TAIL</span></div>
+                </div>;
+              })}</div>
             </section>
 
             <section className="timeline-section card-surface"><div className="card-title-row"><div><p className="eyebrow">CPU HISTORY</p><h2>Execution timeline</h2></div><span>Click any tick to inspect</span></div>
@@ -226,7 +244,7 @@ export default function SchedulingLab() {
               <div className="timeline-legend">{processes.map((process) => <span key={process.id}><i style={{ background: process.color }} />{process.id}</span>)}<span><i className="idle-swatch" />Idle</span></div>
             </section>
 
-            <section className="metrics-section card-surface"><div className="card-title-row"><div><p className="eyebrow">PROCESS ACCOUNTING</p><h2>State & metrics</h2></div><span>{completedCount}/{processes.length} complete</span></div><div className="metrics-scroll"><table><thead><tr><th>Process</th><th>State</th><th>Remaining</th>{algorithm === "mlfq" && <th>Q used</th>}<th>Waiting</th><th>Response</th><th>Turnaround</th></tr></thead><tbody>{snapshot.processes.map((process) => <tr key={process.id}><td><i style={{ background: process.color }} />{process.id}</td><td><span className={`state-pill ${process.state}`}>{process.state}</span></td><td>{process.remainingTime}</td>{algorithm === "mlfq" && <td>{process.state === "finished" ? "—" : `${process.allotmentUsed}/${mlfqQuanta[process.queueLevel]}`}</td>}<td>{process.waitingTime}</td><td>{process.responseTime ?? "—"}</td><td>{process.turnaroundTime ?? "—"}</td></tr>)}</tbody></table></div></section>
+            <section className="metrics-section card-surface"><div className="card-title-row"><div><p className="eyebrow">PROCESS ACCOUNTING</p><h2>State & metrics</h2></div><div className="metric-summary" title={`${completedCount} of ${processes.length} processes complete`}><span><small>AVG W</small><strong>{averageWaiting}</strong></span><span><small>AVG R</small><strong>{averageResponse}</strong></span><span><small>AVG T</small><strong>{averageTurnaround}</strong></span></div></div><div className="metrics-scroll"><table><thead><tr><th>Process</th><th>State</th><th>Remaining</th>{algorithm === "mlfq" && <th>Q used</th>}<th>Waiting</th><th>Response</th><th>Turnaround</th></tr></thead><tbody>{snapshot.processes.map((process) => <tr key={process.id}><td><i style={{ background: process.color }} />{process.id}</td><td><span className={`state-pill ${process.state}`}>{process.state}</span></td><td>{process.remainingTime}</td>{algorithm === "mlfq" && <td>{process.state === "finished" ? "—" : `${process.allotmentUsed}/${mlfqQuanta[process.queueLevel]}`}</td>}<td>{process.waitingTime}</td><td>{process.responseTime ?? "—"}</td><td>{process.turnaroundTime ?? "—"}</td></tr>)}</tbody></table></div></section>
             </div>
           </>}
         </section>
