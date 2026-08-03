@@ -33,13 +33,61 @@ describe("scheduling simulator", () => {
     expect(run("rr", [process("A", 0, 3, 0), process("B", 2, 2, 1)], 2)).toBe("AABBA");
   });
 
-  it("demotes a process after it uses an entire MLFQ quantum", () => {
+  it("demotes a process after it uses an entire MLFQ allotment", () => {
     const result = simulate(
       [process("A", 0, 4, 0), process("B", 1, 1, 1)],
-      { algorithm: "mlfq", quantum: 2, mlfqQuanta: [1, 2, 4] },
+      { algorithm: "mlfq", quantum: 2, mlfqQuanta: [2, 4, 8], mlfqBoostInterval: 100 },
     );
-    expect(result.timeline.map((slice) => slice.processId).join("")).toBe("ABAAA");
-    expect(result.snapshots[1].events).toContain("A used its full quantum and moved from Q0 to Q1.");
+    expect(result.timeline.map((slice) => slice.processId).join("")).toBe("AABAA");
+    expect(result.snapshots[2].events).toContain("A used its full allotment and moved from Q0 to Q1.");
+  });
+
+  it("accounts for CPU use across voluntary early relinquishes", () => {
+    const earlyYielding = { ...process("A", 0, 6, 0), relinquishEarly: true };
+    const result = simulate(
+      [earlyYielding, process("B", 0, 4, 1)],
+      { algorithm: "mlfq", quantum: 2, mlfqQuanta: [4, 8], mlfqBoostInterval: 100 },
+    );
+
+    expect(result.timeline.slice(0, 8).map((slice) => slice.processId).join("")).toBe("AAABBBBA");
+    expect(result.snapshots[3].events).toContain(
+      "A gave up the CPU one tick early at Q0; 3/4 used ticks remain accounted.",
+    );
+    expect(result.snapshots[8].events).toContain("A used its full allotment and moved from Q0 to Q1.");
+  });
+
+  it("periodically boosts every active MLFQ process to Q0", () => {
+    const result = simulate(
+      [process("A", 0, 8, 0), process("B", 0, 8, 1)],
+      { algorithm: "mlfq", quantum: 2, mlfqQuanta: [2, 4, 8], mlfqBoostInterval: 5 },
+    );
+
+    expect(result.snapshots[5].events).toContain(
+      "Priority boost moved 2 active processes to Q0 and reset their allotments.",
+    );
+    expect(result.snapshots[5].processes.every((item) => item.queueLevel === 0)).toBe(true);
+  });
+
+  it("uses round robin at each MLFQ priority level and preserves queue order", () => {
+    const result = simulate(
+      [process("A", 0, 6, 0), process("B", 0, 6, 1)],
+      { algorithm: "mlfq", quantum: 2, mlfqQuanta: [2, 4], mlfqBoostInterval: 100 },
+    );
+
+    expect(result.timeline.map((slice) => slice.processId).join("")).toBe("AABBAAAABBBB");
+  });
+
+  it("preempts a lower queue for a new Q0 arrival without erasing used allotment", () => {
+    const result = simulate(
+      [process("A", 0, 8, 0), process("B", 3, 1, 1)],
+      { algorithm: "mlfq", quantum: 2, mlfqQuanta: [2, 4, 8], mlfqBoostInterval: 100 },
+    );
+
+    expect(result.timeline.slice(0, 4).map((slice) => slice.processId).join("")).toBe("AAAB");
+    expect(result.snapshots[3].events).toContain(
+      "A was preempted by a process in a higher-priority queue.",
+    );
+    expect(result.snapshots[3].processes.find((item) => item.id === "A")?.allotmentUsed).toBe(1);
   });
 
   it("records waiting, response, and turnaround times", () => {

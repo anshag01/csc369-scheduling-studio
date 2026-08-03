@@ -5,12 +5,14 @@ export type ProcessDefinition = {
   arrivalTime: number;
   serviceTime: number;
   color: string;
+  relinquishEarly?: boolean;
 };
 
 export type SimulationConfig = {
   algorithm: Algorithm;
   quantum: number;
   mlfqQuanta: number[];
+  mlfqBoostInterval?: number;
 };
 
 export type ProcessView = ProcessDefinition & {
@@ -20,6 +22,7 @@ export type ProcessView = ProcessDefinition & {
   responseTime: number | null;
   waitingTime: number;
   turnaroundTime: number | null;
+  allotmentUsed: number;
 };
 
 export type Snapshot = {
@@ -122,6 +125,7 @@ function makeViews(
           ? null
           : process.firstRunTime - process.arrivalTime,
       waitingTime: process.waitingTime,
+      allotmentUsed: process.quantumUsed,
       turnaroundTime:
         process.completionTime === null
           ? null
@@ -148,6 +152,12 @@ export function simulate(
     .sort(byStableOrder);
 
   const queueCount = config.algorithm === "mlfq" ? config.mlfqQuanta.length : 1;
+  const boostInterval =
+    config.algorithm === "mlfq" &&
+    Number.isFinite(config.mlfqBoostInterval) &&
+    (config.mlfqBoostInterval ?? 0) > 0
+      ? Math.max(1, Math.floor(config.mlfqBoostInterval!))
+      : null;
   const queues: RuntimeProcess[][] = Array.from({ length: queueCount }, () => []);
   const snapshots: Snapshot[] = [];
   const timeline: TimelineSlice[] = [];
@@ -161,11 +171,34 @@ export function simulate(
   while (time <= maximumTime) {
     const events: string[] = [];
     let expired: RuntimeProcess | null = null;
+    let yielded: RuntimeProcess | null = null;
 
     if (running?.remainingTime === 0) {
       running.completionTime = time;
       events.push(`${running.id} finished and left the system.`);
       running = null;
+    }
+
+    const boostDue =
+      boostInterval !== null && time > 0 && time % boostInterval === 0;
+
+    if (boostDue) {
+      if (running) {
+        queues[running.queueLevel].unshift(running);
+        running = null;
+      }
+      const boosted = queues.flat();
+      for (const queue of queues) queue.length = 0;
+      for (const process of boosted) {
+        process.queueLevel = 0;
+        process.quantumUsed = 0;
+        queues[0].push(process);
+      }
+      if (boosted.length > 0) {
+        events.push(
+          `Priority boost moved ${boosted.length} active process${boosted.length === 1 ? "" : "es"} to Q0 and reset their allotments.`,
+        );
+      }
     } else if (
       running &&
       config.algorithm === "rr" &&
@@ -177,6 +210,13 @@ export function simulate(
       const allotted = config.mlfqQuanta[running.queueLevel];
       if (running.quantumUsed >= allotted) {
         expired = running;
+        running = null;
+      } else if (
+        running.relinquishEarly &&
+        allotted >= 2 &&
+        running.quantumUsed === allotted - 1
+      ) {
+        yielded = running;
         running = null;
       }
     }
@@ -191,6 +231,14 @@ export function simulate(
       events.push(`${process.id} arrived and joined ${queueCount > 1 ? "Q0" : "the ready queue"}.`);
     }
 
+    if (yielded) {
+      const allotted = config.mlfqQuanta[yielded.queueLevel];
+      queues[yielded.queueLevel].push(yielded);
+      events.push(
+        `${yielded.id} gave up the CPU one tick early at Q${yielded.queueLevel}; ${yielded.quantumUsed}/${allotted} used ticks remain accounted.`,
+      );
+    }
+
     if (expired) {
       expired.quantumUsed = 0;
       if (config.algorithm === "mlfq") {
@@ -199,8 +247,8 @@ export function simulate(
         queues[expired.queueLevel].push(expired);
         events.push(
           previousLevel === expired.queueLevel
-            ? `${expired.id} used its full quantum and returned to Q${expired.queueLevel}.`
-            : `${expired.id} used its full quantum and moved from Q${previousLevel} to Q${expired.queueLevel}.`,
+            ? `${expired.id} used its full allotment and returned to Q${expired.queueLevel}.`
+            : `${expired.id} used its full allotment and moved from Q${previousLevel} to Q${expired.queueLevel}.`,
         );
       } else {
         queues[0].push(expired);
