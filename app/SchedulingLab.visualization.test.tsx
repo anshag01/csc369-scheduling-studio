@@ -99,7 +99,14 @@ describe("scheduling visualization mirrors simulator snapshots", () => {
           const className = attribute(timelineTags[index], "class") ?? "";
           expect(className.includes("future")).toBe(slice.time > snapshot.time);
           expect(className.includes("active")).toBe(slice.time === snapshot.time);
+          const isBoostBoundary = algorithm === "mlfq" && slice.time > 0 && slice.time % 5 === 0;
+          expect(attribute(timelineTags[index], "data-boost-boundary")).toBe(isBoostBoundary ? "true" : null);
+          expect(className.includes("boost-tick")).toBe(isBoostBoundary);
         });
+        const expectedBoostMarkers = algorithm === "mlfq"
+          ? result.timeline.filter((slice) => slice.time > 0 && slice.time % 5 === 0).length
+          : 0;
+        expect([...html.matchAll(/class="boost-marker"/g)]).toHaveLength(expectedBoostMarkers);
       }
     });
   }

@@ -106,12 +106,20 @@ test("playback, keyboard stepping, reset, and timeline inspection stay synchroni
 
 test("a priority boost never renews the running Q0 Round Robin turn", async ({ page }) => {
   await page.locator("#algorithm").selectOption("mlfq");
-  await page.getByLabel("Boost").fill("3");
+  await expect(page.getByText("Quantum (= allotment) per queue", { exact: true })).toBeVisible();
+  await page.getByRole("spinbutton", { name: "Boost ticks" }).fill("3");
 
   const trace = await page.locator("[data-timeline-time]").evaluateAll((ticks) =>
     ticks.map((tick) => tick.getAttribute("data-process-id") ?? "").join(""),
   );
   expect(trace).toBe("AABBACCBBDDEECCBBDDD");
+
+  const boostTicks = page.locator('[data-boost-boundary="true"]');
+  await expect(boostTicks).toHaveCount(6);
+  expect(await boostTicks.evaluateAll((ticks) => ticks.map((tick) => tick.getAttribute("data-timeline-time")))).toEqual([
+    "3", "6", "9", "12", "15", "18",
+  ]);
+  await expect(page.locator('[data-timeline-time="3"] .boost-marker')).toHaveText("BOOST");
 
   await page.locator('[data-timeline-time="3"]').click();
   await expect(page.locator(".dashboard-grid")).toHaveAttribute("data-running-process", "B");

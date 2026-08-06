@@ -162,11 +162,15 @@ kbd { padding: 2px 4px; color: #5d5d58; background: #f1f1ee; border: 1px solid #
 .timeline-grid { position: relative; min-width: max-content; display: grid; align-items: end; padding-top: 17px; }
 .timeline-cell { position: relative; min-width: 44px; padding: 0; background: transparent; border: 0; }
 .tick-label { position: absolute; top: -17px; left: 0; color: #858d95; font: 8px var(--font-dm-mono), monospace; }
-.tick-block { height: 38px; display: grid; place-items: center; color: #fff; border-right: 1px solid rgba(255,255,255,.5); font: 500 10px var(--font-dm-mono), monospace; transition: opacity .18s, transform .18s; }
+.tick-block { position: relative; height: 38px; display: grid; place-items: center; color: #fff; border-right: 1px solid rgba(255,255,255,.5); font: 500 10px var(--font-dm-mono), monospace; transition: opacity .18s, transform .18s; }
 .timeline-cell:first-child .tick-block { border-radius: 5px 0 0 5px; }
 .timeline-cell:last-of-type .tick-block { border-radius: 0 5px 5px 0; }
 .timeline-cell.future .tick-block { opacity: .18; filter: grayscale(.7); }
 .timeline-cell.active .tick-block { position: relative; z-index: 2; transform: translateY(-4px); box-shadow: 0 5px 12px rgba(22,34,47,.2); opacity: 1; }
+.timeline-cell.boost-tick .tick-block { box-shadow: inset 0 0 0 2px var(--accent); }
+.timeline-cell.active.boost-tick .tick-block { box-shadow: inset 0 0 0 2px var(--accent), 0 5px 12px rgba(22,34,47,.2); }
+.boost-marker { position: absolute; z-index: 3; top: 2px; right: 2px; padding: 1px 2px; color: #fff; background: #202123; border-radius: 2px; font: 500 5px/1.2 var(--font-dm-mono), monospace; letter-spacing: .02em; pointer-events: none; }
+.timeline-cell.future .boost-marker { opacity: .65; }
 .timeline-end { align-self: start; color: #858d95; font: 8px var(--font-dm-mono), monospace; transform: translateX(-1px); }
 .timeline-legend { display: flex; flex-wrap: wrap; gap: 14px; padding-top: 12px; border-top: 1px solid #e7e7e3; color: #686863; font-size: 9px; }
 .timeline-legend span { display: flex; align-items: center; gap: 5px; }

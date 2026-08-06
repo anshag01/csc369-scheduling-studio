@@ -192,7 +192,7 @@ export default function SchedulingLab({
             </select>
             {algorithm === "rr" && <div className="inline-setting"><label htmlFor="quantum">Time quantum</label><div className="number-with-unit"><input id="quantum" type="number" min="1" value={quantum} onChange={(event) => { resetPlayback(); setQuantum(wholeNumber(event.target.value, 1)); }} /><span>ticks</span></div></div>}
             {algorithm === "mlfq" && <div className="mlfq-settings">
-              <p className="field-label">Quantum / allotment per queue</p>
+              <p className="field-label">Quantum (= allotment) per queue</p>
               {mlfqQuanta.map((value, index) => <label key={index}>Q{index}<input type="number" min="1" value={value} onChange={(event) => { resetPlayback(); setMlfqQuanta((current) => current.map((item, itemIndex) => itemIndex === index ? wholeNumber(event.target.value, 1) : item)); }} /><span>ticks</span></label>)}
               <label className="boost-setting">Boost<input type="number" min="1" value={mlfqBoostInterval} onChange={(event) => { resetPlayback(); setMlfqBoostInterval(wholeNumber(event.target.value, 1)); }} /><span>ticks</span></label>
             </div>}
@@ -253,7 +253,25 @@ export default function SchedulingLab({
             </section>
 
             <section className="timeline-section card-surface"><div className="card-title-row"><div><p className="eyebrow">CPU HISTORY</p><h2>Execution timeline</h2></div><span>Click any tick to inspect</span></div>
-              <div className="timeline-scroll"><div className="timeline-grid" style={{ gridTemplateColumns: `repeat(${Math.max(1, result.timeline.length)}, minmax(44px, 1fr))` }}>{result.timeline.map((slice) => { const process = slice.processId ? processById.get(slice.processId) : null; return <button key={slice.time} data-timeline-time={slice.time} data-process-id={slice.processId ?? ""} onClick={() => { setPlaying(false); setStep(Math.min(slice.time, lastStep)); }} className={`timeline-cell ${slice.time > snapshot.time ? "future" : ""} ${slice.time === snapshot.time ? "active" : ""}`} aria-label={`Time ${slice.time}: ${slice.processId ? `process ${slice.processId}` : "idle"}`}><span className="tick-label">{slice.time}</span><span className="tick-block" style={{ background: process?.color ?? "#cbd0d8" }}>{slice.processId ?? "idle"}</span></button>; })}<span className="timeline-end" style={{ gridColumn: result.timeline.length + 1 }}>{result.timeline.length}</span></div></div>
+              <div className="timeline-scroll"><div className="timeline-grid" style={{ gridTemplateColumns: `repeat(${Math.max(1, result.timeline.length)}, minmax(44px, 1fr))` }}>{result.timeline.map((slice) => {
+                const process = slice.processId ? processById.get(slice.processId) : null;
+                const isBoostBoundary = algorithm === "mlfq" && slice.time > 0 && slice.time % mlfqBoostInterval === 0;
+                return <button
+                  key={slice.time}
+                  data-timeline-time={slice.time}
+                  data-process-id={slice.processId ?? ""}
+                  data-boost-boundary={isBoostBoundary ? "true" : undefined}
+                  onClick={() => { setPlaying(false); setStep(Math.min(slice.time, lastStep)); }}
+                  className={`timeline-cell ${slice.time > snapshot.time ? "future" : ""} ${slice.time === snapshot.time ? "active" : ""} ${isBoostBoundary ? "boost-tick" : ""}`}
+                  aria-label={`Time ${slice.time}: ${slice.processId ? `process ${slice.processId}` : "idle"}${isBoostBoundary ? "; priority boost" : ""}`}
+                >
+                  <span className="tick-label">{slice.time}</span>
+                  <span className="tick-block" style={{ background: process?.color ?? "#cbd0d8" }}>
+                    {slice.processId ?? "idle"}
+                  </span>
+                  {isBoostBoundary && <span className="boost-marker" aria-hidden="true">BOOST</span>}
+                </button>;
+              })}<span className="timeline-end" style={{ gridColumn: result.timeline.length + 1 }}>{result.timeline.length}</span></div></div>
               <div className="timeline-legend">{processes.map((process) => <span key={process.id}><i style={{ background: process.color }} />{process.id}</span>)}<span><i className="idle-swatch" />Idle</span></div>
             </section>
 
