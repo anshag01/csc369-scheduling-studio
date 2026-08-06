@@ -154,7 +154,7 @@ kbd { padding: 2px 4px; color: #5d5d58; background: #f1f1ee; border: 1px solid #
 .queue-chip span { color: #8a929a; font-size: 8px; }
 .queue-chip.mlfq-queue-chip { min-width: 83px; }
 .queue-chip.mlfq-queue-chip span { white-space: nowrap; }
-.running-queue-chip { background: #eef1ff; border: 2px solid var(--accent); border-top: 3px solid var(--process-color); box-shadow: 0 0 0 2px rgba(79,107,237,.14), 0 4px 10px rgba(32,33,35,.1); }
+.running-queue-chip { min-width: 83px; background: #eef1ff; border: 2px solid var(--accent); border-top: 3px solid var(--process-color); box-shadow: 0 0 0 2px rgba(79,107,237,.14), 0 4px 10px rgba(32,33,35,.1); }
 .running-queue-chip strong { display: flex; align-items: center; justify-content: center; gap: 4px; }
 .running-queue-chip strong em { padding: 1px 3px; color: #fff; background: #202123; border-radius: 999px; font: normal 500 5px var(--font-dm-mono), monospace; letter-spacing: .02em; }
 .allotment-meter { height: 3px; display: block; margin-top: 4px; overflow: hidden; background: #e6e8ef; border-radius: 999px; }

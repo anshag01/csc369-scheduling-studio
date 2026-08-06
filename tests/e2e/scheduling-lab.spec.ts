@@ -82,6 +82,33 @@ test("every lecture policy renders every CPU boundary and state exactly", async 
   }
 });
 
+test("the running process remains visible in the scheduler map for every policy", async ({ page }) => {
+  for (const algorithm of ["fcfs", "sjf", "stcf", "rr", "mlfq"] as const) {
+    await page.locator("#algorithm").selectOption(algorithm);
+    await page.getByRole("button", { name: "Next time step" }).click();
+
+    const runningMapChip = page.locator(".running-queue-chip");
+    await expect(runningMapChip).toHaveCount(1);
+    await expect(runningMapChip).toHaveAttribute("data-process-id", "A");
+    await expect(runningMapChip).toHaveAttribute("data-state", "running");
+    await expect(runningMapChip).toHaveAttribute("data-queue-level", "0");
+    await expect(runningMapChip).toHaveAttribute("data-remaining", "2");
+    await expect(runningMapChip).toContainText("A");
+    await expect(runningMapChip).toContainText("ON CPU");
+    await expect(runningMapChip).toContainText("2 left");
+    await expect(page.getByTestId("ready-queue-0")).toHaveAttribute("data-ready-ids", "");
+    await expect(page.getByTestId("ready-queue-0")).toHaveAttribute("data-running-id", "A");
+
+    if (algorithm === "rr") {
+      await expect(runningMapChip).toHaveAttribute("data-quantum-used", "1");
+      await expect(runningMapChip).toContainText("1/2 slice");
+    } else if (algorithm === "mlfq") {
+      await expect(runningMapChip).toHaveAttribute("data-allotment-used", "1");
+      await expect(runningMapChip).toContainText("1/2 used");
+    }
+  }
+});
+
 test("playback, keyboard stepping, reset, and timeline inspection stay synchronized", async ({ page }) => {
   await page.locator("#algorithm").selectOption("rr");
   await page.keyboard.press("ArrowRight");
