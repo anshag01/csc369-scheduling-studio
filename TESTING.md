@@ -10,7 +10,7 @@ The test oracle follows the CSC369 scheduling lecture, the supplied CPU-scheduli
 | SJF | Select the shortest original service time only when the CPU is free; remain non-preemptive; preserve stable ties. |
 | STCF | Select the shortest remaining time; preempt only for a strictly shorter remainder; do not preempt on equality. |
 | RR | Run the queue head for one positive quantum; rotate unfinished work to the tail; place an arrival at an exact expiry boundary before the expired process; do not report expiry after exact completion. |
-| MLFQ | Admit arrivals to Q0; always run the highest-priority non-empty queue; use FIFO/Round Robin within a level; accumulate CPU use across higher-priority preemption; demote after the full per-level allotment; keep bottom-level work at the bottom; periodically boost all active work to Q0 and reset allotments. |
+| MLFQ | Admit arrivals to Q0; always run the highest-priority non-empty queue; use FIFO/Round Robin within a level; accumulate CPU use across higher-priority preemption; demote after the full per-level allotment; keep bottom-level work at the bottom; periodically boost active work to Q0 without renewing a running Q0 turn. |
 
 All policies also verify response, waiting, and turnaround accounting; remaining service; lifecycle state; CPU/ready-queue exclusivity; process conservation; idle ticks; deterministic stable ties; and the final completed state.
 

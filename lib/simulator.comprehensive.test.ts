@@ -118,16 +118,20 @@ function referenceMlfqTimeline(
     let expired: (typeof jobs)[number] | null = null;
     let yielded: (typeof jobs)[number] | null = null;
     if (time > 0 && time % boostInterval === 0) {
-      if (running) {
-        queues[running.level].unshift(running);
-        running = null;
-      }
       const active = queues.flat();
+      const continuingTopTurn =
+        running !== null && running.level === 0 && running.used < quanta[0];
       queues.forEach((queue) => queue.splice(0));
       for (const job of active) {
         job.level = 0;
         job.used = 0;
         queues[0].push(job);
+      }
+      if (running && !continuingTopTurn) {
+        running.level = 0;
+        running.used = 0;
+        queues[0].push(running);
+        running = null;
       }
     } else if (running) {
       const allotment = quanta[running.level];
@@ -272,7 +276,7 @@ function assertSimulationInvariants(
       ) {
         for (const process of snapshot.processes.filter((item) => item.state !== "finished")) {
           expect(process.queueLevel).toBe(0);
-          expect(process.allotmentUsed).toBe(0);
+          if (process.state === "ready") expect(process.allotmentUsed).toBe(0);
         }
       }
     }
@@ -467,7 +471,7 @@ describe("comprehensive scheduling verification", () => {
     );
   });
 
-  it("boosts only active work, resets accounting, and never duplicates a process", () => {
+  it("boosts only active work without renewing a running Q0 turn or duplicating a process", () => {
     const simulationConfig: SimulationConfig = {
       algorithm: "mlfq",
       quantum: 2,
@@ -477,9 +481,9 @@ describe("comprehensive scheduling verification", () => {
     const processes = [definition("A", 0, 1), definition("B", 0, 12), definition("C", 2, 7)];
     const result = simulate(processes, simulationConfig);
     assertSimulationInvariants(processes, simulationConfig);
-    expect(result.snapshots[4].events).toContain(
-      "Priority boost moved 2 active processes to Q0 and reset their allotments.",
-    );
+    expect(result.snapshots[4].events.some((event) =>
+      event.startsWith("Priority boost moved 2 active processes to Q0"),
+    )).toBe(true);
     expect(result.snapshots[4].processes.find((process) => process.id === "A")?.state).toBe("finished");
   });
 });

@@ -190,20 +190,35 @@ export function simulate(
       boostInterval !== null && time > 0 && time % boostInterval === 0;
 
     if (boostDue) {
-      if (running) {
-        queues[running.queueLevel].unshift(running);
-        running = null;
-      }
       const boosted = queues.flat();
+      const activeCount = boosted.length + (running ? 1 : 0);
+      const continuingTopTurn =
+        running !== null &&
+        running.queueLevel === 0 &&
+        running.quantumUsed < config.mlfqQuanta[0];
       for (const queue of queues) queue.length = 0;
       for (const process of boosted) {
         process.queueLevel = 0;
         process.quantumUsed = 0;
         queues[0].push(process);
       }
-      if (boosted.length > 0) {
+
+      // A boost changes priority; it must not renew a Q0 process's current
+      // Round Robin turn. Preserve a partial Q0 allotment so the process still
+      // leaves the CPU at its original quantum boundary. A lower-level or
+      // already-expired runner is requeued at Q0 for a new scheduling turn.
+      if (running && !continuingTopTurn) {
+        running.queueLevel = 0;
+        running.quantumUsed = 0;
+        queues[0].push(running);
+        running = null;
+      }
+
+      if (activeCount > 0) {
         events.push(
-          `Priority boost moved ${boosted.length} active process${boosted.length === 1 ? "" : "es"} to Q0 and reset their allotments.`,
+          continuingTopTurn && running
+            ? `Priority boost moved ${activeCount} active process${activeCount === 1 ? "" : "es"} to Q0; ${running.id}'s in-progress Q0 allotment was preserved.`
+            : `Priority boost moved ${activeCount} active process${activeCount === 1 ? "" : "es"} to Q0.`,
         );
       }
     } else if (

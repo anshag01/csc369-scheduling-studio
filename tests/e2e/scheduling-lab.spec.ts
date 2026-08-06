@@ -104,6 +104,30 @@ test("playback, keyboard stepping, reset, and timeline inspection stay synchroni
   await expect(page.getByRole("button", { name: "Play simulation" })).toBeVisible();
 });
 
+test("a priority boost never renews the running Q0 Round Robin turn", async ({ page }) => {
+  await page.locator("#algorithm").selectOption("mlfq");
+  await page.getByLabel("Boost").fill("3");
+
+  const trace = await page.locator("[data-timeline-time]").evaluateAll((ticks) =>
+    ticks.map((tick) => tick.getAttribute("data-process-id") ?? "").join(""),
+  );
+  expect(trace).toBe("AABBACCBBDDEECCBBDDD");
+
+  await page.locator('[data-timeline-time="3"]').click();
+  await expect(page.locator(".dashboard-grid")).toHaveAttribute("data-running-process", "B");
+  await expect(page.locator(".running-content")).toContainText("Q0 · 1/2 used");
+  await expect(page.getByTestId("event-list")).toContainText(
+    "B's in-progress Q0 allotment was preserved",
+  );
+
+  await page.getByRole("button", { name: "Next time step" }).click();
+  await expect(page.locator(".dashboard-grid")).toHaveAttribute("data-running-process", "A");
+  await expect(page.getByTestId("ready-queue-1")).toHaveAttribute("data-ready-ids", "B");
+  await expect(page.getByTestId("event-list")).toContainText(
+    "B used its full allotment and moved from Q0 to Q1",
+  );
+});
+
 test("invalid edits never leave stale visualization data on screen", async ({ page }) => {
   await page.getByLabel("Process 2 ID").fill("A");
   await expect(page.locator(".validation-message")).toContainText("Process IDs must be unique");

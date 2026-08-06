@@ -144,7 +144,7 @@ describe("scheduler edge cases and failure containment", () => {
     expect(result.snapshots[4].processes.find((item) => item.id === "A")?.allotmentUsed).toBe(1);
   });
 
-  it("boosts only unfinished work and resets every active MLFQ allotment", () => {
+  it("boosts only unfinished work while preserving an in-progress Q0 turn", () => {
     const result = simulate(
       [process("A", 0, 1), process("B", 0, 12), process("C", 2, 5)],
       config("mlfq", { mlfqQuanta: [1, 3, 6], mlfqBoostInterval: 4 }),
@@ -153,9 +153,33 @@ describe("scheduler edge cases and failure containment", () => {
     expect(boost.processes.find((item) => item.id === "A")?.state).toBe("finished");
     for (const active of boost.processes.filter((item) => item.state !== "finished")) {
       expect(active.queueLevel).toBe(0);
-      expect(active.allotmentUsed).toBe(0);
+      if (active.state === "ready") expect(active.allotmentUsed).toBe(0);
     }
     expect(new Set(boost.readyQueues.flat()).size).toBe(boost.readyQueues.flat().length);
+  });
+
+  it("does not let a priority boost silently renew the running Q0 quantum", () => {
+    const result = simulate(
+      [
+        process("A", 0, 3),
+        process("B", 2, 6),
+        process("C", 4, 4),
+        process("D", 6, 5),
+        process("E", 8, 2),
+      ],
+      config("mlfq", { mlfqQuanta: [2, 4, 8], mlfqBoostInterval: 3 }),
+    );
+
+    expect(result.timeline.slice(2, 5).map((slice) => slice.processId).join("")).toBe("BBA");
+    expect(result.snapshots[3].running).toBe("B");
+    expect(result.snapshots[3].processes.find((item) => item.id === "B")?.allotmentUsed).toBe(1);
+    expect(result.snapshots[3].events).toContain(
+      "Priority boost moved 2 active processes to Q0; B's in-progress Q0 allotment was preserved.",
+    );
+    expect(result.snapshots[4].events).toContain(
+      "B used its full allotment and moved from Q0 to Q1.",
+    );
+    expect(result.snapshots[4].running).toBe("A");
   });
 
   it("does not mutate caller-owned process definitions and is deterministic", () => {

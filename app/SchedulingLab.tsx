@@ -39,7 +39,7 @@ const algorithmGuidance: Record<Algorithm, { rule: string; detail: string }> = {
   },
   mlfq: {
     rule: "Run the highest queue; use round robin among processes at the same level.",
-    detail: "CPU use is accounted cumulatively. Full allotment demotes; periodic boosts prevent starvation.",
+    detail: "Full allotment demotes. Boosts return active work to Q0 without renewing an in-progress Q0 turn.",
   },
 };
 

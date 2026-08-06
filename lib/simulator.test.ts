@@ -62,9 +62,9 @@ describe("scheduling simulator", () => {
       { algorithm: "mlfq", quantum: 2, mlfqQuanta: [2, 4, 8], mlfqBoostInterval: 5 },
     );
 
-    expect(result.snapshots[5].events).toContain(
-      "Priority boost moved 2 active processes to Q0 and reset their allotments.",
-    );
+    expect(result.snapshots[5].events.some((event) =>
+      event.startsWith("Priority boost moved 2 active processes to Q0"),
+    )).toBe(true);
     expect(result.snapshots[5].processes.every((item) => item.queueLevel === 0)).toBe(true);
   });
 

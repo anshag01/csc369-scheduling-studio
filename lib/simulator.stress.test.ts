@@ -89,16 +89,22 @@ function referenceSimulation(
       time % config.mlfqBoostInterval === 0;
 
     if (boostDue) {
-      if (running) {
-        queues[running.level].unshift(running);
-        running = null;
-      }
       const active = queues.flat();
+      const continuingTopTurn =
+        running !== null &&
+        running.level === 0 &&
+        running.used < config.mlfqQuanta[0];
       for (const queue of queues) queue.length = 0;
       for (const job of active) {
         job.level = 0;
         job.used = 0;
         queues[0].push(job);
+      }
+      if (running && !continuingTopTurn) {
+        running.level = 0;
+        running.used = 0;
+        queues[0].push(running);
+        running = null;
       }
     } else if (config.algorithm === "rr" && running && running.used >= config.quantum) {
       expired = running;
@@ -306,7 +312,10 @@ function assertScenario(
 
     if (config.algorithm === "mlfq" && config.mlfqBoostInterval && time > 0 && time % config.mlfqBoostInterval === 0) {
       for (const view of snapshot.processes.filter((process) => process.state === "ready" || process.state === "running")) {
-        check(view.queueLevel === 0 && view.allotmentUsed === 0, `Boost failed to reset active process ${view.id} at boundary ${time}.`);
+        check(view.queueLevel === 0, `Boost failed to move active process ${view.id} to Q0 at boundary ${time}.`);
+        if (view.state === "ready") {
+          check(view.allotmentUsed === 0, `Boost failed to reset queued process ${view.id} at boundary ${time}.`);
+        }
       }
     }
 
