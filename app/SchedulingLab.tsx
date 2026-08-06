@@ -5,11 +5,11 @@ import { Algorithm, ProcessDefinition, simulate, validateProcesses } from "../li
 
 const palette = ["#4f6bed", "#8e63ce", "#d18b38", "#d15f5f", "#328ea8", "#667085"];
 const exampleProcesses: ProcessDefinition[] = [
-  { id: "A", arrivalTime: 0, serviceTime: 3, color: palette[0], relinquishEarly: false },
-  { id: "B", arrivalTime: 2, serviceTime: 6, color: palette[1], relinquishEarly: false },
-  { id: "C", arrivalTime: 4, serviceTime: 4, color: palette[2], relinquishEarly: false },
-  { id: "D", arrivalTime: 6, serviceTime: 5, color: palette[3], relinquishEarly: false },
-  { id: "E", arrivalTime: 8, serviceTime: 2, color: palette[4], relinquishEarly: false },
+  { id: "A", arrivalTime: 0, serviceTime: 3, color: palette[0] },
+  { id: "B", arrivalTime: 2, serviceTime: 6, color: palette[1] },
+  { id: "C", arrivalTime: 4, serviceTime: 4, color: palette[2] },
+  { id: "D", arrivalTime: 6, serviceTime: 5, color: palette[3] },
+  { id: "E", arrivalTime: 8, serviceTime: 2, color: palette[4] },
 ];
 
 const algorithms: Record<Algorithm, { name: string; short: string; preemptive: boolean }> = {
@@ -39,7 +39,7 @@ const algorithmGuidance: Record<Algorithm, { rule: string; detail: string }> = {
   },
   mlfq: {
     rule: "Run the highest queue; use round robin among processes at the same level.",
-    detail: "Used ticks accumulate across early yields. Full allotment demotes; periodic boosts prevent starvation.",
+    detail: "CPU use is accounted cumulatively. Full allotment demotes; periodic boosts prevent starvation.",
   },
 };
 
@@ -63,6 +63,7 @@ export default function SchedulingLab() {
   const [step, setStep] = useState(0);
   const [playing, setPlaying] = useState(false);
   const [speed, setSpeed] = useState(800);
+  const [showMetrics, setShowMetrics] = useState(false);
   const [jsonText, setJsonText] = useState("");
   const [jsonMessage, setJsonMessage] = useState("");
 
@@ -110,7 +111,6 @@ export default function SchedulingLab() {
       arrivalTime: Math.max(0, ...current.map((process) => process.arrivalTime)) + 1,
       serviceTime: 3,
       color: palette[current.length % palette.length],
-      relinquishEarly: false,
     }]);
   };
   const loadExample = () => { resetPlayback(); setProcesses(exampleProcesses.map((process) => ({ ...process }))); };
@@ -123,7 +123,6 @@ export default function SchedulingLab() {
       const next = imported.map((process, index) => ({
         id: String(process.id ?? `P${index + 1}`), arrivalTime: Number(process.arrivalTime),
         serviceTime: Number(process.serviceTime), color: String(process.color ?? palette[index % palette.length]),
-        relinquishEarly: Boolean(process.relinquishEarly),
       }));
       const error = validateProcesses(next);
       if (error) throw new Error(error);
@@ -134,8 +133,6 @@ export default function SchedulingLab() {
   const runningProcess = snapshot?.running ? processById.get(snapshot.running) : null;
   const runningView = snapshot?.running ? snapshot.processes.find((process) => process.id === snapshot.running) : null;
   const completedCount = snapshot?.processes.filter((process) => process.state === "finished").length ?? 0;
-  const newCount = snapshot?.processes.filter((process) => process.state === "new").length ?? 0;
-  const readyCount = snapshot?.processes.filter((process) => process.state === "ready").length ?? 0;
   const boostTicksRemaining = snapshot
     ? mlfqBoostInterval - (snapshot.time % mlfqBoostInterval)
     : mlfqBoostInterval;
@@ -183,12 +180,11 @@ export default function SchedulingLab() {
 
           <section className="panel-section process-section">
             <div className="section-heading"><div><span className="step-number">02</span><h2>Define processes</h2></div><button className="text-button" onClick={loadExample}>Load example</button></div>
-            <div className={`process-table-head ${algorithm === "mlfq" ? "mlfq-process-row" : ""}`}><span>Process</span><span>Arrival</span><span>Service</span>{algorithm === "mlfq" && <span title="Give up the CPU one tick before this queue's allotment">Yield</span>}<span /></div>
-            <div className="process-inputs">{processes.map((process, index) => <div className={`process-row ${algorithm === "mlfq" ? "mlfq-process-row" : ""}`} key={`${index}-${process.color}`}>
+            <div className="process-table-head"><span>Process</span><span>Arrival</span><span>Service</span><span /></div>
+            <div className="process-inputs">{processes.map((process, index) => <div className="process-row" key={`${index}-${process.color}`}>
               <label className="process-id-input"><span style={{ background: process.color }} /><input aria-label={`Process ${index + 1} ID`} maxLength={6} value={process.id} onChange={(event) => updateProcess(index, { id: event.target.value.toUpperCase() })} /></label>
               <input aria-label={`${process.id} arrival time`} type="number" min="0" value={process.arrivalTime} onChange={(event) => updateProcess(index, { arrivalTime: wholeNumber(event.target.value, 0) })} />
               <input aria-label={`${process.id} service time`} type="number" min="1" value={process.serviceTime} onChange={(event) => updateProcess(index, { serviceTime: wholeNumber(event.target.value, 1) })} />
-              {algorithm === "mlfq" && <label className="yield-toggle" title="Give up the CPU one tick early; used ticks remain accounted"><input aria-label={`${process.id} gives up CPU one tick early`} type="checkbox" checked={Boolean(process.relinquishEarly)} onChange={(event) => updateProcess(index, { relinquishEarly: event.target.checked })} /></label>}
               <button aria-label={`Remove ${process.id}`} className="remove-button" onClick={() => { resetPlayback(); setProcesses((current) => current.filter((_, processIndex) => processIndex !== index)); }}>×</button>
             </div>)}</div>
             <button className="add-button" onClick={addProcess}><span>＋</span>Add process</button>
@@ -207,20 +203,12 @@ export default function SchedulingLab() {
             </div>
             <div className="time-readout"><span>TIME</span><strong data-testid="time-value">{snapshot?.time ?? "—"}</strong><span>/ {lastStep}</span></div>
             <label className="speed-control">Speed<select value={speed} onChange={(event) => setSpeed(Number(event.target.value))}><option value="1400">Slow</option><option value="800">Normal</option><option value="400">Fast</option></select></label>
+            <button className={`metrics-toggle ${showMetrics ? "active" : ""}`} aria-pressed={showMetrics} onClick={() => setShowMetrics((current) => !current)}>{showMetrics ? "Hide metrics" : "Metrics"}</button>
             <div className="keyboard-hint"><kbd>←</kbd><kbd>→</kbd> step <kbd>space</kbd> play</div>
           </div>
 
           {!snapshot ? <div className="empty-state"><span>!</span><h2>Check the scenario</h2><p>{validationError}</p></div> : <>
-            <section className="state-flow" aria-label="Process lifecycle summary" data-testid="state-flow">
-              <div className="flow-node"><span>NEW</span><strong>{newCount}</strong><small>Not arrived</small></div>
-              <i aria-hidden="true">→</i>
-              <div className="flow-node ready-node"><span>READY</span><strong>{readyCount}</strong><small>In queue</small></div>
-              <i aria-hidden="true">→</i>
-              <div className={`flow-node running-node ${snapshot.running ? "active" : ""}`}><span>RUNNING</span><strong>{snapshot.running ?? "—"}</strong><small>On CPU</small></div>
-              <i aria-hidden="true">→</i>
-              <div className="flow-node finished-node"><span>FINISHED</span><strong>{completedCount}</strong><small>Exited</small></div>
-            </section>
-            <div className={`dashboard-grid ${algorithm === "mlfq" ? "mlfq-dashboard" : ""}`}>
+            <div className={`dashboard-grid ${algorithm === "mlfq" ? "mlfq-dashboard" : ""} ${showMetrics ? "metrics-visible" : "metrics-hidden"}`}>
             <div className="status-grid">
               <article className="cpu-card"><div className="card-label"><span className="live-dot" />CPU · RUNNING</div>
                 {runningProcess ? <div className="running-content"><div className="process-orb" style={{ background: runningProcess.color }}>{runningProcess.id}</div><div><p>Executing now</p><h2>Process {runningProcess.id}</h2><span>{snapshot.runningRemaining} tick{snapshot.runningRemaining === 1 ? "" : "s"} remaining{algorithm === "mlfq" && runningView ? ` · Q${runningView.queueLevel} · ${runningView.allotmentUsed}/${mlfqQuanta[runningView.queueLevel]} used` : ""}</span>{algorithm === "mlfq" && runningView && <div className="running-allotment" title={`${runningView.allotmentUsed} of ${mlfqQuanta[runningView.queueLevel]} allotted ticks used`}><i style={{ width: `${runningView.allotmentUsed / mlfqQuanta[runningView.queueLevel] * 100}%` }} /><small>demote at {mlfqQuanta[runningView.queueLevel]}</small></div>}</div></div> : <div className="idle-content"><div className="process-orb idle">—</div><div><p>Nothing dispatched</p><h2>CPU idle</h2><span>Waiting for work</span></div></div>}
@@ -244,7 +232,7 @@ export default function SchedulingLab() {
               <div className="timeline-legend">{processes.map((process) => <span key={process.id}><i style={{ background: process.color }} />{process.id}</span>)}<span><i className="idle-swatch" />Idle</span></div>
             </section>
 
-            <section className="metrics-section card-surface"><div className="card-title-row"><div><p className="eyebrow">PROCESS ACCOUNTING</p><h2>State & metrics</h2></div><div className="metric-summary" title={`${completedCount} of ${processes.length} processes complete`}><span><small>AVG W</small><strong>{averageWaiting}</strong></span><span><small>AVG R</small><strong>{averageResponse}</strong></span><span><small>AVG T</small><strong>{averageTurnaround}</strong></span></div></div><div className="metrics-scroll"><table><thead><tr><th>Process</th><th>State</th><th>Remaining</th>{algorithm === "mlfq" && <th>Q used</th>}<th>Waiting</th><th>Response</th><th>Turnaround</th></tr></thead><tbody>{snapshot.processes.map((process) => <tr key={process.id}><td><i style={{ background: process.color }} />{process.id}</td><td><span className={`state-pill ${process.state}`}>{process.state}</span></td><td>{process.remainingTime}</td>{algorithm === "mlfq" && <td>{process.state === "finished" ? "—" : `${process.allotmentUsed}/${mlfqQuanta[process.queueLevel]}`}</td>}<td>{process.waitingTime}</td><td>{process.responseTime ?? "—"}</td><td>{process.turnaroundTime ?? "—"}</td></tr>)}</tbody></table></div></section>
+            {showMetrics && <section className="metrics-section card-surface"><div className="card-title-row"><div><p className="eyebrow">PROCESS ACCOUNTING</p><h2>State & metrics</h2></div><div className="metric-summary" title={`${completedCount} of ${processes.length} processes complete`}><span><small>AVG W</small><strong>{averageWaiting}</strong></span><span><small>AVG R</small><strong>{averageResponse}</strong></span><span><small>AVG T</small><strong>{averageTurnaround}</strong></span></div></div><div className="metrics-scroll"><table><thead><tr><th>Process</th><th>State</th><th>Remaining</th>{algorithm === "mlfq" && <th>Q used</th>}<th>Waiting</th><th>Response</th><th>Turnaround</th></tr></thead><tbody>{snapshot.processes.map((process) => <tr key={process.id}><td><i style={{ background: process.color }} />{process.id}</td><td><span className={`state-pill ${process.state}`}>{process.state}</span></td><td>{process.remainingTime}</td>{algorithm === "mlfq" && <td>{process.state === "finished" ? "—" : `${process.allotmentUsed}/${mlfqQuanta[process.queueLevel]}`}</td>}<td>{process.waitingTime}</td><td>{process.responseTime ?? "—"}</td><td>{process.turnaroundTime ?? "—"}</td></tr>)}</tbody></table></div></section>}
             </div>
           </>}
         </section>

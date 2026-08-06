@@ -28,7 +28,8 @@ test("server-renders the complete scheduling studio", async () => {
   assert.match(html, /Choose a policy/);
   assert.match(html, /Define processes/);
   assert.match(html, /Execution timeline/);
-  assert.match(html, /State &amp; metrics/);
+  assert.match(html, />Metrics<\/button>/);
+  assert.doesNotMatch(html, /State &amp; metrics/);
   assert.match(html, /value="fcfs"/);
   assert.match(html, /value="sjf"/);
   assert.match(html, /value="stcf"/);
@@ -55,7 +56,8 @@ test("keeps the production source free of starter-preview wiring", async () => {
   assert.match(schedulingLab, /Priority feedback map/);
   assert.match(schedulingLab, /NEXT BOOST/);
   assert.match(schedulingLab, /allotment-meter/);
-  assert.match(schedulingLab, /gives up CPU one tick early/);
+  assert.match(schedulingLab, /showMetrics/);
+  assert.doesNotMatch(schedulingLab, /gives up CPU one tick early|yield-toggle|state-flow/);
   assert.match(stylesheet, /\.boost-ring/);
   assert.match(stylesheet, /\.queue-row\.active-queue/);
   assert.match(stylesheet, /\.allotment-meter/);
