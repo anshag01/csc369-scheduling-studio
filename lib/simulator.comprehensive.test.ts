@@ -183,6 +183,13 @@ function assertSimulationInvariants(
   const firstExecution = new Map<string, number>();
   const lastExecution = new Map<string, number>();
 
+  expect(result.snapshots.map((snapshot) => snapshot.time)).toEqual(
+    Array.from({ length: result.snapshots.length }, (_, index) => index),
+  );
+  expect(result.timeline.map((slice) => slice.time)).toEqual(
+    Array.from({ length: result.timeline.length }, (_, index) => index),
+  );
+
   for (const slice of result.timeline) {
     if (!slice.processId) continue;
     const process = definitions.find((candidate) => candidate.id === slice.processId)!;
@@ -208,6 +215,29 @@ function assertSimulationInvariants(
     const queued = snapshot.readyQueues.flat();
     expect(new Set(queued).size).toBe(queued.length);
     if (snapshot.running) expect(queued).not.toContain(snapshot.running);
+    if (snapshot.time < result.timeline.length) {
+      expect(result.timeline[snapshot.time].processId).toBe(snapshot.running);
+    }
+
+    expect(snapshot.processes).toHaveLength(definitions.length);
+    for (const process of snapshot.processes) {
+      if (process.state === "new") {
+        expect(process.arrivalTime).toBeGreaterThan(snapshot.time);
+        expect(process.remainingTime).toBe(process.serviceTime);
+        expect(process.responseTime).toBeNull();
+        expect(process.waitingTime).toBe(0);
+      } else {
+        expect(process.arrivalTime).toBeLessThanOrEqual(snapshot.time);
+      }
+      if (process.state === "ready") expect(queued).toContain(process.id);
+      if (process.state === "running") expect(process.id).toBe(snapshot.running);
+      if (process.state === "finished") {
+        expect(process.remainingTime).toBe(0);
+        expect(process.turnaroundTime).not.toBeNull();
+        expect(queued).not.toContain(process.id);
+        expect(process.id).not.toBe(snapshot.running);
+      }
+    }
 
     for (const id of queued) {
       const view = snapshot.processes.find((process) => process.id === id)!;
@@ -355,6 +385,38 @@ describe("comprehensive scheduling verification", () => {
       expect(actual).toBe(referenceMlfqTimeline(processes, quanta, boostInterval));
     }
   });
+
+  it("exhaustively matches MLFQ for every small two-process workload and parameter combination", () => {
+    let comparisons = 0;
+    for (let arrivalA = 0; arrivalA <= 3; arrivalA += 1) {
+      for (let arrivalB = 0; arrivalB <= 3; arrivalB += 1) {
+        for (let serviceA = 1; serviceA <= 4; serviceA += 1) {
+          for (let serviceB = 1; serviceB <= 4; serviceB += 1) {
+            const processes = [
+              definition("A", arrivalA, serviceA),
+              definition("B", arrivalB, serviceB),
+            ];
+            for (let q0 = 1; q0 <= 3; q0 += 1) {
+              for (let q1 = 1; q1 <= 4; q1 += 1) {
+                for (let boost = 2; boost <= 6; boost += 1) {
+                  const quanta = [q0, q1];
+                  const actual = simulate(processes, {
+                    algorithm: "mlfq",
+                    quantum: 1,
+                    mlfqQuanta: quanta,
+                    mlfqBoostInterval: boost,
+                  }).timeline.map((slice) => slice.processId ?? "-").join("");
+                  expect(actual).toBe(referenceMlfqTimeline(processes, quanta, boost));
+                  comparisons += 1;
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+    expect(comparisons).toBe(15_360);
+  }, 60_000);
 
   it("satisfies execution, queue, state, and metric invariants over randomized workloads", () => {
     const next = random(0x3695c5c);

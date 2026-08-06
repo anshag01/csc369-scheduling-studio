@@ -54,16 +54,34 @@ function mean(values: number[]) {
   return Number.isInteger(value) ? String(value) : value.toFixed(1);
 }
 
-export default function SchedulingLab() {
-  const [processes, setProcesses] = useState<ProcessDefinition[]>(exampleProcesses);
-  const [algorithm, setAlgorithm] = useState<Algorithm>("rr");
-  const [quantum, setQuantum] = useState(2);
-  const [mlfqQuanta, setMlfqQuanta] = useState([2, 4, 8]);
-  const [mlfqBoostInterval, setMlfqBoostInterval] = useState(10);
-  const [step, setStep] = useState(0);
+export type SchedulingLabProps = {
+  initialProcesses?: ProcessDefinition[];
+  initialAlgorithm?: Algorithm;
+  initialQuantum?: number;
+  initialMlfqQuanta?: number[];
+  initialMlfqBoostInterval?: number;
+  initialStep?: number;
+  initialShowMetrics?: boolean;
+};
+
+export default function SchedulingLab({
+  initialProcesses = exampleProcesses,
+  initialAlgorithm = "rr",
+  initialQuantum = 2,
+  initialMlfqQuanta = [2, 4, 8],
+  initialMlfqBoostInterval = 10,
+  initialStep = 0,
+  initialShowMetrics = false,
+}: SchedulingLabProps = {}) {
+  const [processes, setProcesses] = useState<ProcessDefinition[]>(() => initialProcesses.map((process) => ({ ...process })));
+  const [algorithm, setAlgorithm] = useState<Algorithm>(initialAlgorithm);
+  const [quantum, setQuantum] = useState(initialQuantum);
+  const [mlfqQuanta, setMlfqQuanta] = useState(() => [...initialMlfqQuanta]);
+  const [mlfqBoostInterval, setMlfqBoostInterval] = useState(initialMlfqBoostInterval);
+  const [step, setStep] = useState(Math.max(0, Math.floor(initialStep)));
   const [playing, setPlaying] = useState(false);
   const [speed, setSpeed] = useState(800);
-  const [showMetrics, setShowMetrics] = useState(false);
+  const [showMetrics, setShowMetrics] = useState(initialShowMetrics);
   const [jsonText, setJsonText] = useState("");
   const [jsonMessage, setJsonMessage] = useState("");
 
@@ -89,13 +107,18 @@ export default function SchedulingLab() {
     const handleKey = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement;
       if (["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName)) return;
-      if (event.key === "ArrowRight") setStep((current) => Math.min(lastStep, current + 1));
-      if (event.key === "ArrowLeft") setStep((current) => Math.max(0, current - 1));
-      if (event.key === " ") { event.preventDefault(); setPlaying((current) => !current); }
+      if (event.key === "ArrowRight") { setPlaying(false); setStep((current) => Math.min(lastStep, current + 1)); }
+      if (event.key === "ArrowLeft") { setPlaying(false); setStep((current) => Math.max(0, current - 1)); }
+      if (event.key === " ") {
+        event.preventDefault();
+        if (!snapshot) return;
+        if (!playing && step >= lastStep) setStep(0);
+        setPlaying((current) => !current);
+      }
     };
     window.addEventListener("keydown", handleKey);
     return () => window.removeEventListener("keydown", handleKey);
-  }, [lastStep]);
+  }, [lastStep, playing, snapshot, step]);
 
   const resetPlayback = () => { setStep(0); setPlaying(false); };
   const updateProcess = (index: number, patch: Partial<ProcessDefinition>) => {
@@ -133,6 +156,8 @@ export default function SchedulingLab() {
   const runningProcess = snapshot?.running ? processById.get(snapshot.running) : null;
   const runningView = snapshot?.running ? snapshot.processes.find((process) => process.id === snapshot.running) : null;
   const completedCount = snapshot?.processes.filter((process) => process.state === "finished").length ?? 0;
+  const futureCount = snapshot?.processes.filter((process) => process.state === "new").length ?? 0;
+  const waitingCount = snapshot?.readyQueues.flat().length ?? 0;
   const boostTicksRemaining = snapshot
     ? mlfqBoostInterval - (snapshot.time % mlfqBoostInterval)
     : mlfqBoostInterval;
@@ -168,7 +193,7 @@ export default function SchedulingLab() {
             {algorithm === "rr" && <div className="inline-setting"><label htmlFor="quantum">Time quantum</label><div className="number-with-unit"><input id="quantum" type="number" min="1" value={quantum} onChange={(event) => { resetPlayback(); setQuantum(wholeNumber(event.target.value, 1)); }} /><span>ticks</span></div></div>}
             {algorithm === "mlfq" && <div className="mlfq-settings">
               <p className="field-label">Quantum / allotment per queue</p>
-              {mlfqQuanta.map((value, index) => <label key={index}>Q{index}<input type="number" min="2" value={value} onChange={(event) => { resetPlayback(); setMlfqQuanta((current) => current.map((item, itemIndex) => itemIndex === index ? wholeNumber(event.target.value, 2) : item)); }} /><span>ticks</span></label>)}
+              {mlfqQuanta.map((value, index) => <label key={index}>Q{index}<input type="number" min="1" value={value} onChange={(event) => { resetPlayback(); setMlfqQuanta((current) => current.map((item, itemIndex) => itemIndex === index ? wholeNumber(event.target.value, 1) : item)); }} /><span>ticks</span></label>)}
               <label className="boost-setting">Boost<input type="number" min="1" value={mlfqBoostInterval} onChange={(event) => { resetPlayback(); setMlfqBoostInterval(wholeNumber(event.target.value, 1)); }} /><span>ticks</span></label>
             </div>}
             <div className="policy-note">
@@ -197,9 +222,9 @@ export default function SchedulingLab() {
           <div className="control-strip">
             <div className="playback-controls" aria-label="Playback controls">
               <button onClick={() => { setStep(0); setPlaying(false); }} disabled={!snapshot || step === 0} aria-label="Reset to time zero">↺</button>
-              <button onClick={() => setStep((current) => Math.max(0, current - 1))} disabled={!snapshot || step === 0} aria-label="Previous time step">←</button>
-              <button className="play-button" onClick={() => { if (step >= lastStep) setStep(0); setPlaying((current) => !current); }} disabled={!snapshot} aria-label={playing ? "Pause simulation" : "Play simulation"}>{playing ? "Ⅱ" : "▶"}</button>
-              <button onClick={() => setStep((current) => Math.min(lastStep, current + 1))} disabled={!snapshot || step === lastStep} aria-label="Next time step">→</button>
+              <button onClick={() => { setPlaying(false); setStep((current) => Math.max(0, current - 1)); }} disabled={!snapshot || step === 0} aria-label="Previous time step">←</button>
+              <button className="play-button" onClick={() => { if (!playing && step >= lastStep) setStep(0); setPlaying((current) => !current); }} disabled={!snapshot} aria-label={playing ? "Pause simulation" : "Play simulation"}>{playing ? "Ⅱ" : "▶"}</button>
+              <button onClick={() => { setPlaying(false); setStep((current) => Math.min(lastStep, current + 1)); }} disabled={!snapshot || step === lastStep} aria-label="Next time step">→</button>
             </div>
             <div className="time-readout"><span>TIME</span><strong data-testid="time-value">{snapshot?.time ?? "—"}</strong><span>/ {lastStep}</span></div>
             <label className="speed-control">Speed<select value={speed} onChange={(event) => setSpeed(Number(event.target.value))}><option value="1400">Slow</option><option value="800">Normal</option><option value="400">Fast</option></select></label>
@@ -208,31 +233,31 @@ export default function SchedulingLab() {
           </div>
 
           {!snapshot ? <div className="empty-state"><span>!</span><h2>Check the scenario</h2><p>{validationError}</p></div> : <>
-            <div className={`dashboard-grid ${algorithm === "mlfq" ? "mlfq-dashboard" : ""} ${showMetrics ? "metrics-visible" : "metrics-hidden"}`}>
+            <div className={`dashboard-grid ${algorithm === "mlfq" ? "mlfq-dashboard" : ""} ${showMetrics ? "metrics-visible" : "metrics-hidden"}`} data-snapshot-time={snapshot.time} data-running-process={snapshot.running ?? ""} data-running-remaining={snapshot.runningRemaining ?? ""}>
             <div className="status-grid">
-              <article className="cpu-card"><div className="card-label"><span className="live-dot" />CPU · RUNNING</div>
+              <article className="cpu-card" data-running-process={snapshot.running ?? ""} data-running-queue={snapshot.runningQueueLevel ?? ""}><div className="card-label"><span className="live-dot" />CPU · RUNNING</div>
                 {runningProcess ? <div className="running-content"><div className="process-orb" style={{ background: runningProcess.color }}>{runningProcess.id}</div><div><p>Executing now</p><h2>Process {runningProcess.id}</h2><span>{snapshot.runningRemaining} tick{snapshot.runningRemaining === 1 ? "" : "s"} remaining{algorithm === "mlfq" && runningView ? ` · Q${runningView.queueLevel} · ${runningView.allotmentUsed}/${mlfqQuanta[runningView.queueLevel]} used` : ""}</span>{algorithm === "mlfq" && runningView && <div className="running-allotment" title={`${runningView.allotmentUsed} of ${mlfqQuanta[runningView.queueLevel]} allotted ticks used`}><i style={{ width: `${runningView.allotmentUsed / mlfqQuanta[runningView.queueLevel] * 100}%` }} /><small>demote at {mlfqQuanta[runningView.queueLevel]}</small></div>}</div></div> : <div className="idle-content"><div className="process-orb idle">—</div><div><p>Nothing dispatched</p><h2>CPU idle</h2><span>Waiting for work</span></div></div>}
                 <div className="cpu-progress"><span style={{ width: runningProcess ? `${((runningProcess.serviceTime - (snapshot.runningRemaining ?? 0)) / runningProcess.serviceTime) * 100}%` : "0%", background: runningProcess?.color }} /></div>
               </article>
-              <article className="event-card"><div className="card-label">AT THIS TIME BOUNDARY</div><div className="event-list" data-testid="event-list">{snapshot.events.length ? snapshot.events.map((event, index) => <p key={index}><span>{index + 1}</span>{event}</p>) : <p className="muted-event">No scheduling decision was needed.</p>}</div></article>
+              <article className="event-card"><div className="card-label">AT THIS TIME BOUNDARY</div><div className="event-list" data-testid="event-list" data-event-count={snapshot.events.length}>{snapshot.events.length ? snapshot.events.map((event, index) => <p key={index}><span>{index + 1}</span>{event}</p>) : <p className="muted-event">No scheduling decision was needed.</p>}</div></article>
             </div>
 
-            <section className="queue-section card-surface"><div className="card-title-row"><div><p className="eyebrow">READY STATE</p><h2>{algorithm === "mlfq" ? "Priority feedback map" : "Ready queue"}</h2></div><div className="queue-summary"><span>{snapshot.readyQueues.flat().length} waiting</span>{algorithm === "mlfq" && <div className="boost-countdown" title={`All active processes return to Q0 in ${boostTicksRemaining} ticks`}><i className="boost-ring" style={{ "--boost-progress": `${boostProgress}%` } as React.CSSProperties}><b>{boostTicksRemaining}</b></i><span><strong>NEXT BOOST</strong><small>ticks remaining</small></span></div>}</div></div>
+            <section className="queue-section card-surface"><div className="card-title-row"><div><p className="eyebrow">READY STATE</p><h2>{algorithm === "mlfq" ? "Priority feedback map" : "Ready queue"}</h2></div><div className="queue-summary"><span data-testid="state-counts" data-new-count={futureCount} data-ready-count={waitingCount} data-finished-count={completedCount}>{futureCount} future · {waitingCount} waiting · {completedCount} finished</span>{algorithm === "mlfq" && <div className="boost-countdown" title={`All active processes return to Q0 in ${boostTicksRemaining} ticks`}><i className="boost-ring" style={{ "--boost-progress": `${boostProgress}%` } as React.CSSProperties}><b>{boostTicksRemaining}</b></i><span><strong>NEXT BOOST</strong><small>ticks remaining</small></span></div>}</div></div>
               <div className={algorithm === "mlfq" ? "multi-queues" : "single-queue"}>{snapshot.readyQueues.map((queue, queueIndex) => {
                 const isRunningLevel = algorithm === "mlfq" && snapshot.runningQueueLevel === queueIndex;
                 return <div className={`queue-row ${isRunningLevel ? "active-queue" : ""}`} key={queueIndex}>
                   {algorithm === "mlfq" && <div className="queue-label"><div><strong>Q{queueIndex}</strong>{isRunningLevel && <em>{snapshot.running} ON CPU</em>}</div><span>{queueIndex === 0 ? "Highest" : queueIndex === snapshot.readyQueues.length - 1 ? "Lowest" : "Medium"} · allotment {mlfqQuanta[queueIndex]}</span>{queueIndex < snapshot.readyQueues.length - 1 && <i className="demotion-cue">full allotment ↓</i>}</div>}
-                  <div className="queue-track" data-testid={`ready-queue-${queueIndex}`}><span className="queue-head">HEAD</span>{queue.length === 0 ? <span className="empty-queue">Queue empty</span> : queue.map((id, index) => { const process = processById.get(id)!; const view = snapshot.processes.find((item) => item.id === id); const allotted = mlfqQuanta[queueIndex]; const used = view?.allotmentUsed ?? 0; return <div className={`queue-chip ${algorithm === "mlfq" ? "mlfq-queue-chip" : ""}`} key={`${id}-${index}`} style={{ "--process-color": process.color } as React.CSSProperties} title={algorithm === "mlfq" ? `${id}: ${used} of ${allotted} ticks used at Q${queueIndex}` : undefined}><strong>{id}</strong><span>{view?.remainingTime} left{algorithm === "mlfq" ? ` · ${used}/${allotted} used` : ""}</span>{algorithm === "mlfq" && <i className="allotment-meter" aria-hidden="true"><b style={{ width: `${used / allotted * 100}%` }} /></i>}</div>; })}<span className="queue-tail">TAIL</span></div>
+                  <div className="queue-track" data-testid={`ready-queue-${queueIndex}`} data-ready-ids={queue.join(",")}><span className="queue-head">HEAD</span>{queue.length === 0 ? <span className="empty-queue">Queue empty</span> : queue.map((id, index) => { const process = processById.get(id)!; const view = snapshot.processes.find((item) => item.id === id); const allotted = mlfqQuanta[queueIndex]; const used = view?.allotmentUsed ?? 0; return <div className={`queue-chip ${algorithm === "mlfq" ? "mlfq-queue-chip" : ""}`} data-process-id={id} data-remaining={view?.remainingTime} data-allotment-used={algorithm === "mlfq" ? used : undefined} key={`${id}-${index}`} style={{ "--process-color": process.color } as React.CSSProperties} title={algorithm === "mlfq" ? `${id}: ${used} of ${allotted} ticks used at Q${queueIndex}` : undefined}><strong>{id}</strong><span>{view?.remainingTime} left{algorithm === "mlfq" ? ` · ${used}/${allotted} used` : ""}</span>{algorithm === "mlfq" && <i className="allotment-meter" aria-hidden="true"><b style={{ width: `${used / allotted * 100}%` }} /></i>}</div>; })}<span className="queue-tail">TAIL</span></div>
                 </div>;
               })}</div>
             </section>
 
             <section className="timeline-section card-surface"><div className="card-title-row"><div><p className="eyebrow">CPU HISTORY</p><h2>Execution timeline</h2></div><span>Click any tick to inspect</span></div>
-              <div className="timeline-scroll"><div className="timeline-grid" style={{ gridTemplateColumns: `repeat(${Math.max(1, result.timeline.length)}, minmax(44px, 1fr))` }}>{result.timeline.map((slice) => { const process = slice.processId ? processById.get(slice.processId) : null; return <button key={slice.time} onClick={() => setStep(Math.min(slice.time, lastStep))} className={`timeline-cell ${slice.time > snapshot.time ? "future" : ""} ${slice.time === snapshot.time ? "active" : ""}`} aria-label={`Time ${slice.time}: ${slice.processId ? `process ${slice.processId}` : "idle"}`}><span className="tick-label">{slice.time}</span><span className="tick-block" style={{ background: process?.color ?? "#cbd0d8" }}>{slice.processId ?? "idle"}</span></button>; })}<span className="timeline-end" style={{ gridColumn: result.timeline.length + 1 }}>{result.timeline.length}</span></div></div>
+              <div className="timeline-scroll"><div className="timeline-grid" style={{ gridTemplateColumns: `repeat(${Math.max(1, result.timeline.length)}, minmax(44px, 1fr))` }}>{result.timeline.map((slice) => { const process = slice.processId ? processById.get(slice.processId) : null; return <button key={slice.time} data-timeline-time={slice.time} data-process-id={slice.processId ?? ""} onClick={() => { setPlaying(false); setStep(Math.min(slice.time, lastStep)); }} className={`timeline-cell ${slice.time > snapshot.time ? "future" : ""} ${slice.time === snapshot.time ? "active" : ""}`} aria-label={`Time ${slice.time}: ${slice.processId ? `process ${slice.processId}` : "idle"}`}><span className="tick-label">{slice.time}</span><span className="tick-block" style={{ background: process?.color ?? "#cbd0d8" }}>{slice.processId ?? "idle"}</span></button>; })}<span className="timeline-end" style={{ gridColumn: result.timeline.length + 1 }}>{result.timeline.length}</span></div></div>
               <div className="timeline-legend">{processes.map((process) => <span key={process.id}><i style={{ background: process.color }} />{process.id}</span>)}<span><i className="idle-swatch" />Idle</span></div>
             </section>
 
-            {showMetrics && <section className="metrics-section card-surface"><div className="card-title-row"><div><p className="eyebrow">PROCESS ACCOUNTING</p><h2>State & metrics</h2></div><div className="metric-summary" title={`${completedCount} of ${processes.length} processes complete`}><span><small>AVG W</small><strong>{averageWaiting}</strong></span><span><small>AVG R</small><strong>{averageResponse}</strong></span><span><small>AVG T</small><strong>{averageTurnaround}</strong></span></div></div><div className="metrics-scroll"><table><thead><tr><th>Process</th><th>State</th><th>Remaining</th>{algorithm === "mlfq" && <th>Q used</th>}<th>Waiting</th><th>Response</th><th>Turnaround</th></tr></thead><tbody>{snapshot.processes.map((process) => <tr key={process.id}><td><i style={{ background: process.color }} />{process.id}</td><td><span className={`state-pill ${process.state}`}>{process.state}</span></td><td>{process.remainingTime}</td>{algorithm === "mlfq" && <td>{process.state === "finished" ? "—" : `${process.allotmentUsed}/${mlfqQuanta[process.queueLevel]}`}</td>}<td>{process.waitingTime}</td><td>{process.responseTime ?? "—"}</td><td>{process.turnaroundTime ?? "—"}</td></tr>)}</tbody></table></div></section>}
+            {showMetrics && <section className="metrics-section card-surface"><div className="card-title-row"><div><p className="eyebrow">PROCESS ACCOUNTING</p><h2>State & metrics</h2></div><div className="metric-summary" title={`${completedCount} of ${processes.length} processes complete`}><span><small>AVG W</small><strong>{averageWaiting}</strong></span><span><small>AVG R</small><strong>{averageResponse}</strong></span><span><small>AVG T</small><strong>{averageTurnaround}</strong></span></div></div><div className="metrics-scroll"><table><thead><tr><th>Process</th><th>State</th><th>Remaining</th>{algorithm === "mlfq" && <th>Q used</th>}<th>Waiting</th><th>Response</th><th>Turnaround</th></tr></thead><tbody>{snapshot.processes.map((process) => <tr key={process.id} data-process-id={process.id} data-state={process.state} data-remaining={process.remainingTime} data-queue-level={algorithm === "mlfq" ? process.queueLevel : undefined} data-allotment-used={algorithm === "mlfq" ? process.allotmentUsed : undefined}><td><i style={{ background: process.color }} />{process.id}</td><td><span className={`state-pill ${process.state}`}>{process.state}</span></td><td>{process.remainingTime}</td>{algorithm === "mlfq" && <td>{process.state === "finished" ? "—" : `${process.allotmentUsed}/${mlfqQuanta[process.queueLevel]}`}</td>}<td>{process.waitingTime}</td><td>{process.responseTime ?? "—"}</td><td>{process.turnaroundTime ?? "—"}</td></tr>)}</tbody></table></div></section>}
             </div>
           </>}
         </section>

@@ -127,6 +127,7 @@ kbd { padding: 2px 4px; color: #5d5d58; background: #f1f1ee; border: 1px solid #
 .card-title-row > div .eyebrow { margin-bottom: 3px; }
 .card-title-row > span { color: #8b939b; font-size: 10px; }
 .queue-summary { display: flex; align-items: center; gap: 12px; color: #8b939b; font-size: 10px; }
+.queue-summary > span { white-space: nowrap; }
 .boost-countdown { display: flex; align-items: center; gap: 7px; padding: 4px 7px 4px 5px; background: #f4f5fa; border: 1px solid #e0e3ef; border-radius: 999px; }
 .boost-ring { --boost-progress: 0%; position: relative; width: 30px; height: 30px; flex: 0 0 auto; display: grid; place-items: center; background: conic-gradient(var(--accent) var(--boost-progress), #dfe2ec 0); border-radius: 50%; font-style: normal; }
 .boost-ring::after { content: ""; position: absolute; inset: 4px; background: #fff; border-radius: 50%; }
@@ -149,7 +150,7 @@ kbd { padding: 2px 4px; color: #5d5d58; background: #f1f1ee; border: 1px solid #
 .queue-head, .queue-tail { color: #a1a7ad; font: 8px var(--font-dm-mono), monospace; writing-mode: vertical-rl; transform: rotate(180deg); }
 .queue-tail { margin-left: auto; transform: none; }
 .queue-chip { min-width: 57px; padding: 7px 8px; background: #fff; border: 1px solid #dededb; border-top: 3px solid var(--process-color); border-radius: 5px; box-shadow: 0 3px 8px rgba(0,0,0,.045); text-align: center; }
-.queue-chip strong { display: block; font: 500 13px var(--font-dm-mono), monospace; }
+.queue-chip strong { display: block; overflow: hidden; font: 500 13px var(--font-dm-mono), monospace; text-overflow: ellipsis; white-space: nowrap; }
 .queue-chip span { color: #8a929a; font-size: 8px; }
 .queue-chip.mlfq-queue-chip { min-width: 83px; }
 .queue-chip.mlfq-queue-chip span { white-space: nowrap; }
@@ -202,7 +203,7 @@ footer { display: flex; justify-content: space-between; gap: 16px; padding: 13px
   .brand-copy h1 { font-size: 20px; }
   .brand-copy .eyebrow { font-size: 8px; }
   .workspace { height: 100%; min-height: 0; grid-template-columns: 328px minmax(0, 1fr); overflow: hidden; }
-  .setup-panel { height: 100%; overflow: hidden; }
+  .setup-panel { height: 100%; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; }
   .panel-section { padding: 13px 17px; }
   .section-heading { margin-bottom: 10px; }
   .section-heading h2 { font-size: 13px; }
@@ -257,6 +258,8 @@ footer { display: flex; justify-content: space-between; gap: 16px; padding: 13px
   .running-allotment { height: 3px; margin-top: 5px; }
   .running-allotment > small { display: none; }
   .event-list { gap: 4px; margin-top: 8px; }
+  .event-card { display: flex; flex-direction: column; overflow: hidden; }
+  .event-card .event-list { min-height: 0; flex: 1; padding-right: 3px; overflow-y: auto; }
   .event-list p { gap: 6px; font-size: 9px; line-height: 1.25; }
   .event-list p > span { width: 15px; height: 15px; font-size: 7px; }
   .queue-row { grid-template-columns: 88px minmax(0, 1fr); gap: 7px; }
@@ -281,7 +284,7 @@ footer { display: flex; justify-content: space-between; gap: 16px; padding: 13px
   .metric-summary > span { min-width: 35px; padding: 2px 4px; }
   .metric-summary small { font-size: 5px; }
   .metric-summary strong { font-size: 8px; }
-  .metrics-scroll { height: calc(100% - 33px); overflow: hidden; }
+  .metrics-scroll { height: calc(100% - 33px); overflow: auto; }
   .metrics-scroll table { height: 100%; }
   th { padding: 5px 7px; font-size: 7px; }
   td { padding: 5px 7px; font-size: 9px; }

@@ -45,6 +45,9 @@ export type SimulationResult = {
   timeline: TimelineSlice[];
 };
 
+export const MAX_PROCESSES = 50;
+export const MAX_SIMULATION_TICKS = 2000;
+
 type RuntimeProcess = ProcessDefinition & {
   index: number;
   remainingTime: number;
@@ -138,6 +141,10 @@ export function simulate(
   definitions: ProcessDefinition[],
   config: SimulationConfig,
 ): SimulationResult {
+  const processError = validateProcesses(definitions);
+  if (processError) throw new RangeError(processError);
+  validateSimulationConfig(config);
+
   const processes: RuntimeProcess[] = definitions
     .map((process, index) => ({
       ...process,
@@ -326,14 +333,43 @@ export function simulate(
 
 export function validateProcesses(processes: ProcessDefinition[]): string | null {
   if (processes.length === 0) return "Add at least one process to run the simulation.";
+  if (processes.length > MAX_PROCESSES) {
+    return `Use no more than ${MAX_PROCESSES} processes in one visualization.`;
+  }
   const normalized = processes.map((process) => process.id.trim().toLowerCase());
   if (normalized.some((id) => !id)) return "Every process needs an ID.";
   if (new Set(normalized).size !== normalized.length) return "Process IDs must be unique.";
-  if (processes.some((process) => !Number.isInteger(process.arrivalTime) || process.arrivalTime < 0)) {
+  if (processes.some((process) => !Number.isSafeInteger(process.arrivalTime) || process.arrivalTime < 0)) {
     return "Arrival times must be whole numbers greater than or equal to zero.";
   }
-  if (processes.some((process) => !Number.isInteger(process.serviceTime) || process.serviceTime < 1)) {
+  if (processes.some((process) => !Number.isSafeInteger(process.serviceTime) || process.serviceTime < 1)) {
     return "Service times must be positive whole numbers.";
   }
+  let estimatedEnd = 0;
+  for (const process of [...processes].sort((left, right) => left.arrivalTime - right.arrivalTime)) {
+    estimatedEnd = Math.max(estimatedEnd, process.arrivalTime) + process.serviceTime;
+  }
+  if (!Number.isSafeInteger(estimatedEnd) || estimatedEnd > MAX_SIMULATION_TICKS) {
+    return `Keep the complete simulation at or below ${MAX_SIMULATION_TICKS} ticks.`;
+  }
   return null;
+}
+
+export function validateSimulationConfig(config: SimulationConfig): void {
+  if (config.algorithm === "rr" && (!Number.isSafeInteger(config.quantum) || config.quantum < 1)) {
+    throw new RangeError("The Round Robin quantum must be a positive whole number.");
+  }
+  if (config.algorithm !== "mlfq") return;
+  if (
+    config.mlfqQuanta.length === 0 ||
+    config.mlfqQuanta.some((quantum) => !Number.isSafeInteger(quantum) || quantum < 1)
+  ) {
+    throw new RangeError("MLFQ needs at least one queue, each with a positive whole-number allotment.");
+  }
+  if (
+    config.mlfqBoostInterval !== undefined &&
+    (!Number.isSafeInteger(config.mlfqBoostInterval) || config.mlfqBoostInterval < 1)
+  ) {
+    throw new RangeError("The MLFQ boost interval must be a positive whole number when provided.");
+  }
 }

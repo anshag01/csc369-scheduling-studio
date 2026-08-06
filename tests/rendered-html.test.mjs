@@ -57,10 +57,16 @@ test("keeps the production source free of starter-preview wiring", async () => {
   assert.match(schedulingLab, /NEXT BOOST/);
   assert.match(schedulingLab, /allotment-meter/);
   assert.match(schedulingLab, /showMetrics/);
+  assert.match(schedulingLab, /data-testid="state-counts"/);
+  assert.match(schedulingLab, /data-ready-ids/);
+  assert.match(schedulingLab, /data-timeline-time/);
   assert.doesNotMatch(schedulingLab, /gives up CPU one tick early|yield-toggle|state-flow/);
   assert.match(stylesheet, /\.boost-ring/);
   assert.match(stylesheet, /\.queue-row\.active-queue/);
   assert.match(stylesheet, /\.allotment-meter/);
+  assert.match(stylesheet, /\.dashboard-grid\.mlfq-dashboard[^}]*225px/);
+  assert.match(stylesheet, /\.event-card \.event-list[^}]*overflow-y: auto/);
+  assert.match(stylesheet, /\.metrics-scroll[^}]*overflow: auto/);
   assert.doesNotMatch(stylesheet, /#10a37f|#19c37d/i);
 
   assert.equal(projectRoot.protocol, "file:");
