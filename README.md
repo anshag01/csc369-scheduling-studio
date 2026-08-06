@@ -1,5 +1,7 @@
 # CSC369 Scheduling Studio
 
+[![Scheduler verification](https://github.com/anshag01/csc369-scheduling-studio/actions/workflows/scheduler-verification.yml/badge.svg)](https://github.com/anshag01/csc369-scheduling-studio/actions/workflows/scheduler-verification.yml)
+
 An interactive, single-CPU scheduling visualizer based on the CSC369 scheduling lecture and instructor discussion.
 
 ## Included policies
@@ -33,4 +35,4 @@ npm install
 npm run dev
 ```
 
-Run the scheduling-engine tests with `npm run test:unit` and create a production build with `npm run build`.
+Run the normal scheduling-engine tests with `npm run test:unit`, the independent large-workload suite with `npm run test:stress`, and the browser visualization suite with `npm run test:e2e` (after `npx playwright install chromium`). See [TESTING.md](TESTING.md) for the rule-to-test mapping and complete verification matrix.

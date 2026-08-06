@@ -7,12 +7,17 @@
   },
   "scripts": {
     "dev": "vinext dev",
+    "dev:e2e": "next dev -p 4173",
     "build": "vinext build",
     "build:vercel": "next build",
     "start": "vinext start",
     "test:unit": "vitest run --config vitest.config.ts",
-    "test": "npm run build && node --test tests/rendered-html.test.mjs",
+    "test:stress": "vitest run --config vitest.stress.config.ts",
+    "test:rendered": "node --test tests/rendered-html.test.mjs",
+    "test:e2e": "playwright test",
+    "test": "npm run test:unit && npm run test:stress && npm run build && npm run test:rendered",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
+    "lint:ci": "eslint app lib tests vitest.config.ts vitest.stress.config.ts playwright.config.ts",
     "db:generate": "drizzle-kit generate"
   },
   "dependencies": {
@@ -23,6 +28,7 @@
   },
   "devDependencies": {
     "@cloudflare/vite-plugin": "1.37.1",
+    "@playwright/test": "^1.62.1",
     "@tailwindcss/postcss": "4.2.1",
     "@types/node": "22.19.19",
     "@types/react": "19.2.14",
