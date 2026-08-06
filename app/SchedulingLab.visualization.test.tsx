@@ -77,7 +77,24 @@ describe("scheduling visualization mirrors simulator snapshots", () => {
         snapshot.readyQueues.forEach((queue, index) => {
           expect(attribute(queueTags[index], "data-testid")).toBe(`ready-queue-${index}`);
           expect(attribute(queueTags[index], "data-ready-ids")).toBe(queue.join(","));
+          expect(attribute(queueTags[index], "data-running-id")).toBe(
+            algorithm === "mlfq" && snapshot.runningQueueLevel === index ? snapshot.running : "",
+          );
         });
+
+        const runningMapTags = [...html.matchAll(/<div class="queue-chip mlfq-queue-chip running-queue-chip"[^>]*>/g)]
+          .map((match) => match[0]);
+        if (algorithm === "mlfq" && snapshot.running) {
+          const runningView = snapshot.processes.find((process) => process.id === snapshot.running)!;
+          expect(runningMapTags).toHaveLength(1);
+          expect(attribute(runningMapTags[0], "data-process-id")).toBe(snapshot.running);
+          expect(attribute(runningMapTags[0], "data-state")).toBe("running");
+          expect(attribute(runningMapTags[0], "data-queue-level")).toBe(String(runningView.queueLevel));
+          expect(attribute(runningMapTags[0], "data-remaining")).toBe(String(runningView.remainingTime));
+          expect(attribute(runningMapTags[0], "data-allotment-used")).toBe(String(runningView.allotmentUsed));
+        } else {
+          expect(runningMapTags).toHaveLength(0);
+        }
 
         const metricRows = [...html.matchAll(/<tr data-process-id="[^"]+"[^>]*>/g)].map((match) => match[0]);
         expect(metricRows).toHaveLength(snapshot.processes.length);

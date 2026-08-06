@@ -124,6 +124,16 @@ test("a priority boost never renews the running Q0 Round Robin turn", async ({ p
   await page.locator('[data-timeline-time="3"]').click();
   await expect(page.locator(".dashboard-grid")).toHaveAttribute("data-running-process", "B");
   await expect(page.locator(".running-content")).toContainText("Q0 · 1/2 used");
+  const runningMapChip = page.locator(".running-queue-chip");
+  await expect(runningMapChip).toHaveCount(1);
+  await expect(runningMapChip).toHaveAttribute("data-process-id", "B");
+  await expect(runningMapChip).toHaveAttribute("data-queue-level", "0");
+  await expect(runningMapChip).toHaveAttribute("data-remaining", "5");
+  await expect(runningMapChip).toHaveAttribute("data-allotment-used", "1");
+  await expect(runningMapChip).toContainText("ON CPU");
+  await expect(runningMapChip).toContainText("5 left · 1/2 used");
+  await expect(page.getByTestId("ready-queue-0")).toHaveAttribute("data-ready-ids", "A");
+  await expect(page.getByTestId("ready-queue-0")).toHaveAttribute("data-running-id", "B");
   await expect(page.getByTestId("event-list")).toContainText(
     "B's in-progress Q0 allotment was preserved",
   );
