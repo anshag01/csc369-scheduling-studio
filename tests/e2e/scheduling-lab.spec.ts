@@ -96,19 +96,42 @@ test("the running process appears only on the CPU for every policy", async ({ pa
     await expect(cpuProcessCard).toHaveAttribute("data-queue-level", "0");
     await expect(cpuProcessCard).toHaveAttribute("data-remaining", "2");
     await expect(cpuProcessCard).toContainText("A");
-    await expect(cpuProcessCard).toContainText("ON CPU");
-    await expect(cpuProcessCard).toContainText("2 ticks remaining");
+    await expect(cpuProcessCard).toContainText("2 left");
+    await expect(cpuProcessCard).not.toContainText("ON CPU");
+    await expect(page.locator(".cpu-process-copy")).toContainText("2 ticks remaining");
     await expect(page.getByTestId("ready-queue-0")).toHaveAttribute("data-ready-ids", "");
     await expect(page.locator('.queue-track [data-state="running"]')).toHaveCount(0);
 
     if (algorithm === "rr") {
       await expect(cpuProcessCard).toHaveAttribute("data-quantum-used", "1");
-      await expect(cpuProcessCard).toContainText("1/2 quantum used");
+      await expect(page.locator(".cpu-process-copy")).toContainText("1/2 quantum used");
     } else if (algorithm === "mlfq") {
       await expect(cpuProcessCard).toHaveAttribute("data-allotment-used", "1");
-      await expect(cpuProcessCard).toContainText("1/2 allotment used");
+      await expect(cpuProcessCard).toContainText("1/2 used");
+      await expect(page.locator(".cpu-process-copy")).toContainText("1/2 allotment used");
     }
   }
+});
+
+test("CPU and ready process cards keep identical geometry", async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.locator(".json-panel summary").click();
+  await page.getByLabel("Scenario JSON").fill(JSON.stringify({
+    processes: [
+      { id: "A", arrivalTime: 0, serviceTime: 4 },
+      { id: "B", arrivalTime: 0, serviceTime: 4 },
+    ],
+  }));
+  await page.getByRole("button", { name: "Import", exact: true }).click();
+  await page.getByRole("button", { name: "Next time step" }).click();
+
+  const geometry = await page.locator('[data-motion-id="A"], [data-motion-id="B"]').evaluateAll((cards) =>
+    Object.fromEntries(cards.map((card) => {
+      const rect = card.getBoundingClientRect();
+      return [card.getAttribute("data-motion-place"), { width: rect.width, height: rect.height }];
+    })),
+  );
+  expect(geometry.cpu).toEqual(geometry.ready);
 });
 
 test("process cards animate every scheduler transfer and reverse step without duplicates", async ({ page }) => {
@@ -141,6 +164,19 @@ test("process cards animate every scheduler transfer and reverse step without du
     arrow.getAnimations({ subtree: true }).length,
   )).toBe(0);
   expect(await page.locator('.process-motion-traveler[data-process-id="A"]').evaluate((card) => card.getAnimations().length)).toBeGreaterThan(0);
+  const stableTraveler = await page.locator('.process-motion-traveler[data-process-id="A"]').evaluate((card) => {
+    const travelerRect = card.getBoundingClientRect();
+    const destinationRect = document.querySelector<HTMLElement>('[data-motion-id="A"]')!.getBoundingClientRect();
+    const transforms = card.getAnimations().flatMap((animation) =>
+      (animation.effect as KeyframeEffect).getKeyframes().map((frame) => String(frame.transform ?? "")),
+    );
+    return {
+      sameSize: Math.abs(travelerRect.width - destinationRect.width) < 1 && Math.abs(travelerRect.height - destinationRect.height) < 1,
+      transforms,
+    };
+  });
+  expect(stableTraveler.sameSize).toBe(true);
+  expect(stableTraveler.transforms.every((transform) => !transform.includes("scale"))).toBe(true);
   await page.waitForTimeout(750);
   const rotationPositions = await page.locator(".process-motion-traveler").evaluateAll((cards) =>
     Object.fromEntries(cards.map((card) => [card.getAttribute("data-process-id"), card.getBoundingClientRect().x])),
@@ -154,7 +190,7 @@ test("process cards animate every scheduler transfer and reverse step without du
   await expect(dispatchMarker).toHaveAttribute("aria-label", "DISPATCH · B → CPU");
   await expect(page.getByRole("button", { name: "Next time step" })).toBeDisabled();
   const arrowGeometry = await page.locator(".process-motion-arrow").evaluateAll((arrows) => arrows.map((arrow) => ({
-    width: arrow.getBoundingClientRect().width,
+    width: Number.parseFloat((arrow as HTMLElement).style.width),
     rotation: (arrow as HTMLElement).style.transform,
   })));
   expect(arrowGeometry.every(({ width, rotation }) => width > 30 && rotation.startsWith("rotate("))).toBe(true);
@@ -190,16 +226,29 @@ test("busy MLFQ boundaries move process cards through exact intermediate states 
     .sort((left, right) => left.rect.x - right.rect.x));
   expect(boosted.map(({ id }) => id)).toEqual(["A", "B", "C", "D"]);
   expect(new Set(boosted.map(({ rect }) => Math.round(rect.y))).size).toBe(1);
+  for (let index = 1; index < boosted.length; index += 1) {
+    expect(boosted[index - 1].rect.x + boosted[index - 1].rect.width).toBeLessThanOrEqual(boosted[index].rect.x);
+  }
   const boostedBLeft = boosted[1].rect.x;
 
   await expect(page.locator(".motion-cue")).toContainText("A dispatch → CPU", { timeout: 5_000 });
   await page.waitForTimeout(750);
   const dispatched = await page.locator(".process-motion-traveler").evaluateAll((cards) => Object.fromEntries(cards.map((card) => {
     const rect = card.getBoundingClientRect();
-    return [card.getAttribute("data-process-id"), { x: rect.x, y: rect.y }];
+    return [card.getAttribute("data-process-id"), { x: rect.x, y: rect.y, width: rect.width, height: rect.height }];
   })));
   expect(dispatched.A.y).toBeLessThan(dispatched.B.y);
   expect(dispatched.B.x).toBeLessThan(boostedBLeft);
+  const movingRects = Object.values(dispatched);
+  for (let leftIndex = 0; leftIndex < movingRects.length; leftIndex += 1) {
+    for (let rightIndex = leftIndex + 1; rightIndex < movingRects.length; rightIndex += 1) {
+      const left = movingRects[leftIndex];
+      const right = movingRects[rightIndex];
+      const overlaps = left.x < right.x + right.width && left.x + left.width > right.x &&
+        left.y < right.y + right.height && left.y + left.height > right.y;
+      expect(overlaps).toBe(false);
+    }
+  }
   expect(await page.locator('.process-motion-arrow[data-motion-action="dispatch"]').evaluate((arrow) =>
     arrow.getAnimations({ subtree: true }).length,
   )).toBe(0);
@@ -233,7 +282,7 @@ test("completion and MLFQ boosts have complete, destination-based animations", a
   await page.getByRole("button", { name: "Next time step" }).click();
 
   await expect(page.getByTestId("cpu-process-card")).toHaveAttribute("data-process-id", "A");
-  await expect(page.getByTestId("cpu-process-card")).toContainText("Q1 · 2/4 allotment used");
+  await expect(page.locator(".cpu-process-copy")).toContainText("Q1 · 2/4 allotment used");
   await expect(page.getByTestId("ready-queue-0")).toHaveAttribute("data-ready-ids", "B");
   await expect(page.locator(".dashboard-grid")).toHaveAttribute("data-last-motion-types", /q1->q0/);
   await expect(page.locator('.process-motion-arrow[data-motion-action="boost"][data-motion-process-id="B"]')).toContainText("PRIORITY BOOST · B");
@@ -311,7 +360,7 @@ test("an immediately redispatched process still shows its intermediate queue mov
   await page.getByRole("button", { name: "Next time step" }).click();
   await expect(dashboard).toHaveAttribute("data-last-motion-types", "cpu->q1->cpu");
   await expect(page.locator('.process-motion-arrow[data-motion-action="demote"]')).toContainText("DEMOTE · A");
-  await expect(page.getByTestId("cpu-process-card")).toContainText("Q1 · 0/4 allotment used");
+  await expect(page.locator(".cpu-process-copy")).toContainText("Q1 · 0/4 allotment used");
   await expect(page.getByTestId("ready-queue-1")).toHaveAttribute("data-ready-ids", "");
 
   await page.getByRole("spinbutton", { name: "Q0" }).fill("2");
@@ -322,7 +371,7 @@ test("an immediately redispatched process still shows its intermediate queue mov
   await expect(page.locator('.process-motion-arrow[data-motion-action="demote"]')).toContainText("DEMOTE · A");
   await expect(page.locator('.process-motion-arrow[data-motion-action="boost"]')).toContainText("PRIORITY BOOST · A");
   await expect(page.locator('.process-motion-arrow[data-motion-action="dispatch"]')).toContainText("DISPATCH · A");
-  await expect(page.getByTestId("cpu-process-card")).toContainText("Q0 · 0/2 allotment used");
+  await expect(page.locator(".cpu-process-copy")).toContainText("Q0 · 0/2 allotment used");
   await expect(page.getByTestId("event-list")).toContainText("moved from Q0 to Q1");
   await expect(page.getByTestId("event-list")).toContainText("Priority boost moved 1 waiting process to Q0");
 });
@@ -372,14 +421,14 @@ test("a priority boost never renews the running Q0 Round Robin turn", async ({ p
   await page.locator('[data-timeline-time="3"]').click();
   await expect(page.locator(".dashboard-grid")).toHaveAttribute("data-running-process", "B");
   const cpuProcessCard = page.getByTestId("cpu-process-card");
-  await expect(cpuProcessCard).toContainText("Q0 · 1/2 allotment used");
+  await expect(page.locator(".cpu-process-copy")).toContainText("Q0 · 1/2 allotment used");
   await expect(cpuProcessCard).toHaveCount(1);
   await expect(cpuProcessCard).toHaveAttribute("data-process-id", "B");
   await expect(cpuProcessCard).toHaveAttribute("data-queue-level", "0");
   await expect(cpuProcessCard).toHaveAttribute("data-remaining", "5");
   await expect(cpuProcessCard).toHaveAttribute("data-allotment-used", "1");
-  await expect(cpuProcessCard).toContainText("ON CPU");
-  await expect(cpuProcessCard).toContainText("5 ticks remaining");
+  await expect(cpuProcessCard).toContainText("5 left");
+  await expect(page.locator(".cpu-process-copy")).toContainText("5 ticks remaining");
   await expect(page.getByTestId("ready-queue-0")).toHaveAttribute("data-ready-ids", "A");
   await expect(page.locator('.queue-track [data-process-id="B"]')).toHaveCount(0);
   await expect(page.getByTestId("event-list")).toContainText(

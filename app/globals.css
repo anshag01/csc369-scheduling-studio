@@ -109,13 +109,9 @@ kbd { padding: 2px 4px; color: #5d5d58; background: #f1f1ee; border: 1px solid #
 .cpu-card { position: relative; min-height: 172px; padding: 18px 20px 23px; overflow: hidden; }
 .card-label { display: flex; align-items: center; gap: 8px; color: #7e8790; font: 500 9px var(--font-dm-mono), monospace; letter-spacing: .11em; }
 .running-content, .idle-content { display: flex; align-items: center; gap: 16px; margin-top: 21px; }
-.cpu-process-card { width: min(205px, 52%); min-width: 170px; padding: 10px 12px; text-align: left; box-shadow: 0 0 0 2px rgba(79,107,237,.12), 0 8px 18px rgba(32,33,35,.1); }
-.cpu-process-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.cpu-process-card .cpu-process-heading strong { font-size: 18px; }
-.cpu-process-heading em { padding: 2px 6px; color: #fff; background: #202123; border-radius: 999px; font: normal 500 7px var(--font-dm-mono), monospace; letter-spacing: .05em; }
-.cpu-process-card > span, .cpu-process-card > small { display: block; margin-top: 2px; color: #69727b; font: 9px var(--font-dm-mono), monospace; }
-.cpu-process-card > small { color: #4a5fb7; }
+.cpu-process-card { flex: 0 0 var(--process-card-width); box-shadow: 0 0 0 2px rgba(79,107,237,.16), 0 8px 18px rgba(32,33,35,.1); }
 .cpu-process-copy { min-width: 0; }
+.cpu-process-copy small { display: block; margin-top: 4px; color: #4a5fb7; font: 8px var(--font-dm-mono), monospace; white-space: nowrap; }
 .process-orb { width: 66px; height: 66px; flex: 0 0 auto; display: grid; place-items: center; color: #fff; border: 5px solid rgba(255,255,255,.65); border-radius: 50%; box-shadow: 0 0 0 1px rgba(20,30,40,.12), 0 7px 18px rgba(20,30,40,.14); font: 500 22px var(--font-dm-mono), monospace; }
 .process-orb.idle { color: #9ca3aa; background: #eef0f1; }
 .running-content p, .idle-content p { margin: 0 0 2px; color: #9098a0; font-size: 10px; }
@@ -160,17 +156,20 @@ kbd { padding: 2px 4px; color: #5d5d58; background: #f1f1ee; border: 1px solid #
 .queue-row.active-queue .queue-label { background: #e5eaff; box-shadow: inset 0 0 0 1px #cfd6f6; }
 .queue-head, .queue-tail { color: #a1a7ad; font: 8px var(--font-dm-mono), monospace; writing-mode: vertical-rl; transform: rotate(180deg); }
 .queue-tail { margin-left: auto; transform: none; }
-.queue-chip { min-width: 57px; padding: 7px 8px; background: #fff; border: 1px solid #dededb; border-top: 3px solid var(--process-color); border-radius: 5px; box-shadow: 0 3px 8px rgba(0,0,0,.045); text-align: center; }
+.dashboard-grid { --process-card-width: 96px; --process-card-height: 52px; }
+.queue-chip { width: var(--process-card-width); min-width: var(--process-card-width); height: var(--process-card-height); flex: 0 0 var(--process-card-width); box-sizing: border-box; display: flex; flex-direction: column; justify-content: center; padding: 7px 8px; overflow: hidden; background: #fff; border: 1px solid #dededb; border-top: 3px solid var(--process-color); border-radius: 5px; box-shadow: 0 3px 8px rgba(0,0,0,.045); text-align: center; }
 .queue-chip strong { display: block; overflow: hidden; font: 500 13px var(--font-dm-mono), monospace; text-overflow: ellipsis; white-space: nowrap; }
-.queue-chip span { color: #8a929a; font-size: 8px; }
-.queue-chip.mlfq-queue-chip { min-width: 83px; }
+.queue-chip span { display: block; overflow: hidden; color: #8a929a; font-size: 8px; text-overflow: ellipsis; white-space: nowrap; }
+.queue-chip.mlfq-queue-chip { min-width: var(--process-card-width); }
 .queue-chip.mlfq-queue-chip span { white-space: nowrap; }
 .allotment-meter { height: 3px; display: block; margin-top: 4px; overflow: hidden; background: #e6e8ef; border-radius: 999px; }
 .allotment-meter b { height: 100%; display: block; background: var(--accent); border-radius: inherit; transition: width .2s ease; }
 .empty-queue { margin: auto; color: #a4abb1; font-size: 10px; font-style: italic; }
 [data-motion-id] { position: relative; will-change: transform; }
 .process-is-moving { outline: 2px solid var(--process-color); outline-offset: 2px; filter: drop-shadow(0 7px 12px rgba(32,33,35,.24)); }
-.process-motion-traveler { position: fixed !important; z-index: 9999 !important; margin: 0 !important; pointer-events: none !important; transform-origin: top left !important; overflow: hidden; }
+.process-motion-traveler { position: fixed !important; z-index: 9999 !important; margin: 0 !important; pointer-events: none !important; transform-origin: center !important; overflow: hidden; contain: layout paint; }
+.process-just-landed { animation: process-land .36s ease-out; }
+@keyframes process-land { 0% { box-shadow: 0 0 0 3px color-mix(in srgb, var(--process-color) 38%, transparent), 0 8px 18px rgba(32,33,35,.12); } 100% { box-shadow: 0 3px 8px rgba(0,0,0,.045); } }
 .process-motion-ghost { position: fixed; z-index: 9999; display: grid; place-items: center; pointer-events: none; color: var(--ink); background: #fff; border: 1px solid #dededb; border-top: 3px solid var(--process-color); border-radius: 5px; box-shadow: 0 12px 28px rgba(32,33,35,.2); font: 500 13px var(--font-dm-mono), monospace; }
 .process-motion-arrow { --arrow-color: #4f6bed; position: fixed; z-index: 9998; height: 0; color: var(--arrow-color); pointer-events: none; transform-origin: left center; filter: drop-shadow(0 2px 3px rgba(32,33,35,.16)); }
 .process-motion-arrow > i { position: absolute; top: -1.5px; left: 0; width: 100%; height: 3px; display: block; background: currentColor; border-radius: 999px; transform-origin: left center; }
@@ -270,7 +269,7 @@ footer { display: flex; justify-content: space-between; gap: 16px; padding: 13px
   .speed-control select { padding: 5px; }
   .metrics-toggle { padding: 6px 8px; font-size: 8px; }
 
-  .dashboard-grid { min-height: 0; flex: 1; display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(310px, .75fr); grid-template-rows: 128px 150px minmax(135px, 1fr); grid-template-areas: "status status" "queue metrics" "timeline metrics"; gap: 7px; }
+  .dashboard-grid { --process-card-width: 84px; --process-card-height: 42px; min-height: 0; flex: 1; display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(310px, .75fr); grid-template-rows: 128px 150px minmax(135px, 1fr); grid-template-areas: "status status" "queue metrics" "timeline metrics"; gap: 7px; }
   .dashboard-grid.mlfq-dashboard { grid-template-rows: 118px 225px minmax(100px, 1fr); }
   .dashboard-grid.metrics-hidden { grid-template-columns: minmax(0, 1fr); grid-template-areas: "status" "queue" "timeline"; }
   .mlfq-dashboard .timeline-legend { display: none; }
@@ -289,10 +288,8 @@ footer { display: flex; justify-content: space-between; gap: 16px; padding: 13px
   .boost-ring b { font-size: 7px; }
   .boost-countdown strong, .boost-countdown small { font-size: 6px; }
   .running-content, .idle-content { gap: 11px; margin-top: 9px; }
-  .cpu-process-card { min-width: 150px; padding: 6px 9px; }
-  .cpu-process-card .cpu-process-heading strong { font-size: 14px; }
-  .cpu-process-card > span, .cpu-process-card > small { font-size: 7px; }
   .cpu-process-copy h2 { font-size: 14px; }
+  .cpu-process-copy small { margin-top: 2px; font-size: 7px; }
   .process-orb { width: 48px; height: 48px; border-width: 3px; font-size: 16px; }
   .running-content h2, .idle-content h2 { margin-bottom: 1px; font-size: 16px; }
   .running-allotment { height: 3px; margin-top: 5px; }
@@ -310,9 +307,9 @@ footer { display: flex; justify-content: space-between; gap: 16px; padding: 13px
   .demotion-cue { bottom: -6px; font-size: 5px; }
   .multi-queues { gap: 4px; }
   .queue-track { min-height: 36px; gap: 5px; padding: 4px 7px; }
-  .queue-chip { min-width: 48px; padding: 3px 6px; }
+  .queue-chip { min-width: var(--process-card-width); padding: 3px 6px; }
   .queue-chip strong { font-size: 10px; }
-  .queue-chip.mlfq-queue-chip { min-width: 80px; }
+  .queue-chip.mlfq-queue-chip { min-width: var(--process-card-width); }
   .allotment-meter { height: 2px; margin-top: 2px; }
   .timeline-scroll { padding: 2px 0 8px; }
   .timeline-grid { padding-top: 13px; }
@@ -358,4 +355,4 @@ footer { display: flex; justify-content: space-between; gap: 16px; padding: 13px
   .queue-row { grid-template-columns: 90px minmax(0, 1fr); }
   footer { flex-direction: column; }
 }
-@media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; } }
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; animation-duration: .01ms !important; } }

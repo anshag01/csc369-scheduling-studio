@@ -307,8 +307,15 @@ function useProcessMotion(
         if (target) {
           target.style.visibility = "";
           target.removeAttribute("data-motion-hidden");
+          target.classList.add("process-just-landed");
+          const landingTimer = window.setTimeout(() => target.classList.remove("process-just-landed"), 360);
+          motionTimers.current.push(landingTimer);
         }
       };
+      const centeredTranslation = (source: DOMRect, destination: DOMRect) => ({
+        x: destination.left + destination.width / 2 - (source.left + source.width / 2),
+        y: destination.top + destination.height / 2 - (source.top + source.height / 2),
+      });
       const travelCard = (
         template: HTMLElement,
         source: DOMRect,
@@ -317,14 +324,11 @@ function useProcessMotion(
         schedule: { delay: number; duration: number },
       ) => {
         const traveler = createTraveler(template, source, target);
-        const deltaX = destination.left - source.left;
-        const deltaY = destination.top - source.top;
-        const scaleX = destination.width / Math.max(1, source.width);
-        const scaleY = destination.height / Math.max(1, source.height);
+        const delta = centeredTranslation(source, destination);
         const animation = traveler.animate(
           [
-            { transform: "translate(0, 0) scale(1, 1)" },
-            { transform: `translate(${deltaX}px, ${deltaY}px) scale(${scaleX}, ${scaleY})` },
+            { transform: "translate(0, 0)" },
+            { transform: `translate(${delta.x}px, ${delta.y}px)` },
           ],
           {
             delay: schedule.delay + arrowLead,
@@ -349,21 +353,22 @@ function useProcessMotion(
         template: HTMLElement,
         source: DOMRect,
         target: HTMLElement,
-        stages: Array<{ action: Action; destination: DOMRect }>,
+        stages: Array<{ action: Action; destination: DOMRect; lag?: number }>,
       ) => {
         const traveler = createTraveler(template, source, target);
         const total = Math.max(...stages.map(({ action }) => {
           const schedule = stageSchedule(action);
           return schedule.delay + schedule.duration;
         }));
-        const keyframes: Keyframe[] = [{ transform: "translate(0, 0) scale(1, 1)", offset: 0 }];
-        let previousTransform = "translate(0, 0) scale(1, 1)";
-        for (const { action, destination } of stages) {
+        const keyframes: Keyframe[] = [{ transform: "translate(0, 0)", offset: 0 }];
+        let previousTransform = "translate(0, 0)";
+        for (const { action, destination, lag = 0 } of stages) {
           const schedule = stageSchedule(action);
-          const startOffset = Math.min(.98, (schedule.delay + arrowLead) / total);
+          const startOffset = Math.min(.98, (schedule.delay + arrowLead + lag) / total);
           const endOffset = Math.min(1, (schedule.delay + schedule.duration * .8) / total);
-          keyframes.push({ transform: previousTransform, offset: startOffset });
-          previousTransform = `translate(${destination.left - source.left}px, ${destination.top - source.top}px) scale(${destination.width / Math.max(1, source.width)}, ${destination.height / Math.max(1, source.height)})`;
+          keyframes.push({ transform: previousTransform, offset: startOffset, easing: "cubic-bezier(.2,.75,.2,1)" });
+          const delta = centeredTranslation(source, destination);
+          previousTransform = `translate(${delta.x}px, ${delta.y}px)`;
           keyframes.push({ transform: previousTransform, offset: endOffset });
         }
         if ((keyframes.at(-1)?.offset ?? 0) < 1) keyframes.push({ transform: previousTransform, offset: 1 });
@@ -409,14 +414,16 @@ function useProcessMotion(
             const routeDuration = dispatchSchedule.delay + dispatchSchedule.duration;
             const queueArrival = Math.min(.78, (arrivalSchedule.delay + arrivalSchedule.duration * .78) / routeDuration);
             const queueDeparture = Math.max(queueArrival, dispatchSchedule.delay / routeDuration);
-            const sourceRect = rectAround(source, next.rect.width * .62, next.rect.height * .62);
+            const sourceRect = rectAround(source, next.rect.width, next.rect.height);
             const traveler = createTraveler(next.template, sourceRect, node);
+            const queueDelta = centeredTranslation(sourceRect, rectAround(queue, next.rect.width, next.rect.height));
+            const cpuDelta = centeredTranslation(sourceRect, next.rect);
             const animation = traveler.animate(
               [
-                { opacity: 0, transform: "translate(0, 0) scale(1)", offset: 0 },
-                { opacity: 1, transform: `translate(${queue.x - source.x}px, ${queue.y - source.y}px) scale(1)`, offset: queueArrival },
-                { opacity: 1, transform: `translate(${queue.x - source.x}px, ${queue.y - source.y}px) scale(1)`, offset: queueDeparture },
-                { opacity: 1, transform: `translate(${next.rect.left - sourceRect.left}px, ${next.rect.top - sourceRect.top}px) scale(${next.rect.width / sourceRect.width}, ${next.rect.height / sourceRect.height})`, offset: 1 },
+                { opacity: 0, transform: "translate(0, 0)", offset: 0 },
+                { opacity: 1, transform: `translate(${queueDelta.x}px, ${queueDelta.y}px)`, offset: queueArrival },
+                { opacity: 1, transform: `translate(${queueDelta.x}px, ${queueDelta.y}px)`, offset: queueDeparture, easing: "cubic-bezier(.2,.75,.2,1)" },
+                { opacity: 1, transform: `translate(${cpuDelta.x}px, ${cpuDelta.y}px)`, offset: 1 },
               ],
               { duration: routeDuration, fill: "both", easing: "linear" },
             );
@@ -427,7 +434,7 @@ function useProcessMotion(
           } else {
             const source = { x: destination.x, y: destination.y - 42 };
             const schedule = showArrow(source, destination, id, "arrive");
-            travelCard(next.template, rectAround(source, next.rect.width * .78, next.rect.height * .78), next.rect, node, schedule);
+            travelCard(next.template, rectAround(source, next.rect.width, next.rect.height), next.rect, node, schedule);
             movements.push(`arrival->${next.place}`);
             recordCue(id, "arrive", next.place);
           }
@@ -439,7 +446,7 @@ function useProcessMotion(
           const intermediate = queueSlotRect("q0", Math.max(0, boostIndex), before.rect.width, before.rect.height);
           const boostSchedule = showArrow(center(before.rect), center(intermediate), id, "boost");
           recordCue(id, "boost", "q0");
-          const stages: Array<{ action: Action; destination: DOMRect }> = [{ action: "boost", destination: intermediate }];
+          const stages: Array<{ action: Action; destination: DOMRect; lag?: number }> = [{ action: "boost", destination: intermediate }];
           if (next.place === "cpu") {
             showArrow(center(intermediate), center(next.rect), id, "dispatch");
             recordCue(id, "dispatch", "cpu");
@@ -448,7 +455,7 @@ function useProcessMotion(
           } else {
             const dispatchFollows = stageOrder.indexOf("dispatch") > stageOrder.indexOf("boost");
             const needsCompaction = Math.abs(intermediate.left - next.rect.left) > 1 || Math.abs(intermediate.top - next.rect.top) > 1;
-            if (dispatchFollows && needsCompaction) stages.push({ action: "dispatch", destination: next.rect });
+            if (dispatchFollows && needsCompaction) stages.push({ action: "dispatch", destination: next.rect, lag: Math.min(180, stageDuration * .12) });
             movements.push(`${before.place}->q0`);
           }
           travelStages(before.template, before.rect, node, stages);
@@ -565,19 +572,21 @@ function useProcessMotion(
         const traveler = createTraveler(before.template, before.rect, node);
         const sourceCenter = center(before.rect);
         const keyframes: Keyframe[] = [
-          { transform: "translate(0, 0) scale(1)", offset: 0 },
-          { transform: "translate(0, 0) scale(1)", offset: Math.min(.3, arrowLead / routeDuration) },
+          { transform: "translate(0, 0)", offset: 0 },
+          { transform: "translate(0, 0)", offset: Math.min(.3, arrowLead / routeDuration), easing: "cubic-bezier(.2,.75,.2,1)" },
         ];
         visualDestinations.forEach((destination, index) => {
           const target = queuePoint(destination) ?? center(next.rect);
           const schedule = stageSchedule(visualActions[index]);
           keyframes.push({
-            transform: `translate(${target.x - sourceCenter.x}px, ${target.y - sourceCenter.y}px) scale(.62)`,
+            transform: `translate(${target.x - sourceCenter.x}px, ${target.y - sourceCenter.y}px)`,
             offset: Math.min(.9, (schedule.delay + schedule.duration * .78) / routeDuration),
+            easing: "cubic-bezier(.2,.75,.2,1)",
           });
         });
+        const finalDelta = centeredTranslation(before.rect, next.rect);
         keyframes.push({
-          transform: `translate(${next.rect.left - before.rect.left}px, ${next.rect.top - before.rect.top}px) scale(${next.rect.width / Math.max(1, before.rect.width)}, ${next.rect.height / Math.max(1, before.rect.height)})`,
+          transform: `translate(${finalDelta.x}px, ${finalDelta.y}px)`,
           offset: 1,
         });
         const animation = traveler.animate(keyframes, { duration: routeDuration, fill: "both", easing: "linear" });
@@ -599,8 +608,8 @@ function useProcessMotion(
         recordCue(id, action, direction === "forward" ? "finished" : "future", direction === "backward");
         const animation = traveler.animate(
           [
-            { opacity: 1, transform: "translate(0, 0) scale(1)" },
-            { opacity: .08, transform: `translate(${deltaX}px, ${deltaY}px) scale(.28)` },
+            { opacity: 1, transform: "translate(0, 0)" },
+            { opacity: .08, transform: `translate(${deltaX}px, ${deltaY}px)` },
           ],
           { delay: schedule.delay + arrowLead, duration: schedule.duration - arrowLead, fill: "backwards", easing: "cubic-bezier(.4,0,.2,1)" },
         );
@@ -876,12 +885,10 @@ export default function SchedulingLab({
                   data-motion-color={runningProcess.color}
                   style={{ "--process-color": runningProcess.color } as React.CSSProperties}
                 >
-                  <div className="cpu-process-heading"><strong>{runningView.id}</strong><em>ON CPU</em></div>
-                  <span>{runningView.remainingTime} tick{runningView.remainingTime === 1 ? "" : "s"} remaining</span>
-                  {algorithm === "mlfq" && <small>Q{runningView.queueLevel} · {runningView.allotmentUsed}/{mlfqQuanta[runningView.queueLevel]} allotment used</small>}
-                  {algorithm === "rr" && <small>{runningView.allotmentUsed}/{quantum} quantum used</small>}
-                  {(algorithm === "mlfq" || algorithm === "rr") && <i className="allotment-meter" aria-hidden="true"><b style={{ width: `${runningView.allotmentUsed / (algorithm === "mlfq" ? mlfqQuanta[runningView.queueLevel] : quantum) * 100}%` }} /></i>}
-                </div><div className="cpu-process-copy"><p>Executing now</p><h2>Process {runningProcess.id}</h2><span>Only on the CPU—not in a ready queue</span></div></div> : <div className="idle-content"><div className="process-orb idle">—</div><div><p>Nothing dispatched</p><h2>CPU idle</h2><span>Waiting for work</span></div></div>}
+                  <strong>{runningView.id}</strong>
+                  <span>{runningView.remainingTime} left{algorithm === "mlfq" ? ` · ${runningView.allotmentUsed}/${mlfqQuanta[runningView.queueLevel]} used` : ""}</span>
+                  {algorithm === "mlfq" && <i className="allotment-meter" aria-hidden="true"><b style={{ width: `${runningView.allotmentUsed / mlfqQuanta[runningView.queueLevel] * 100}%` }} /></i>}
+                </div><div className="cpu-process-copy"><p>Executing now</p><h2>Process {runningProcess.id}</h2><span>{runningView.remainingTime} tick{runningView.remainingTime === 1 ? "" : "s"} remaining</span>{algorithm === "mlfq" && <small>Q{runningView.queueLevel} · {runningView.allotmentUsed}/{mlfqQuanta[runningView.queueLevel]} allotment used</small>}{algorithm === "rr" && <small>{runningView.allotmentUsed}/{quantum} quantum used</small>}</div></div> : <div className="idle-content"><div className="process-orb idle">—</div><div><p>Nothing dispatched</p><h2>CPU idle</h2><span>Waiting for work</span></div></div>}
                 <div className="cpu-progress"><span style={{ width: runningProcess ? `${((runningProcess.serviceTime - (snapshot.runningRemaining ?? 0)) / runningProcess.serviceTime) * 100}%` : "0%", background: runningProcess?.color }} /></div>
               </article>
               <article className="event-card"><div className="card-label">AT THIS TIME BOUNDARY</div><div className="event-list" data-testid="event-list" data-event-count={snapshot.events.length}>{snapshot.events.length ? snapshot.events.map((event, index) => <p key={index}><span>{index + 1}</span>{event}</p>) : <p className="muted-event">No scheduling decision was needed.</p>}</div></article>
