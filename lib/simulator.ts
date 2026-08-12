@@ -56,6 +56,7 @@ type RuntimeProcess = ProcessDefinition & {
   firstRunTime: number | null;
   completionTime: number | null;
   waitingTime: number;
+  boostProtected: boolean;
 };
 
 const byStableOrder = (a: RuntimeProcess, b: RuntimeProcess) =>
@@ -155,6 +156,7 @@ export function simulate(
       firstRunTime: null,
       completionTime: null,
       waitingTime: 0,
+      boostProtected: false,
     }))
     .sort(byStableOrder);
 
@@ -186,42 +188,9 @@ export function simulate(
       running = null;
     }
 
-    const boostDue =
-      boostInterval !== null && time > 0 && time % boostInterval === 0;
+    const boostDue = boostInterval !== null && time > 0 && time % boostInterval === 0;
 
-    if (boostDue) {
-      const boosted = queues.flat();
-      const activeCount = boosted.length + (running ? 1 : 0);
-      const continuingTopTurn =
-        running !== null &&
-        running.queueLevel === 0 &&
-        running.quantumUsed < config.mlfqQuanta[0];
-      for (const queue of queues) queue.length = 0;
-      for (const process of boosted) {
-        process.queueLevel = 0;
-        process.quantumUsed = 0;
-        queues[0].push(process);
-      }
-
-      // A boost changes priority; it must not renew a Q0 process's current
-      // Round Robin turn. Preserve a partial Q0 allotment so the process still
-      // leaves the CPU at its original quantum boundary. A lower-level or
-      // already-expired runner is requeued at Q0 for a new scheduling turn.
-      if (running && !continuingTopTurn) {
-        running.queueLevel = 0;
-        running.quantumUsed = 0;
-        queues[0].push(running);
-        running = null;
-      }
-
-      if (activeCount > 0) {
-        events.push(
-          continuingTopTurn && running
-            ? `Priority boost moved ${activeCount} active process${activeCount === 1 ? "" : "es"} to Q0; ${running.id}'s in-progress Q0 allotment was preserved.`
-            : `Priority boost moved ${activeCount} active process${activeCount === 1 ? "" : "es"} to Q0.`,
-        );
-      }
-    } else if (
+    if (
       running &&
       config.algorithm === "rr" &&
       running.quantumUsed >= config.quantum
@@ -243,25 +212,20 @@ export function simulate(
       }
     }
 
-    const arrivals = processes.filter(
-      (process) => process.arrivalTime === time && process.remainingTime > 0,
-    );
-    for (const process of arrivals) {
-      process.queueLevel = 0;
-      process.quantumUsed = 0;
-      queues[0].push(process);
-      events.push(`${process.id} arrived and joined ${queueCount > 1 ? "Q0" : "the ready queue"}.`);
-    }
-
-    if (yielded) {
+    const enqueueYielded = () => {
+      if (!yielded) return;
       const allotted = config.mlfqQuanta[yielded.queueLevel];
+      yielded.boostProtected = false;
       queues[yielded.queueLevel].push(yielded);
       events.push(
         `${yielded.id} gave up the CPU one tick early at Q${yielded.queueLevel}; ${yielded.quantumUsed}/${allotted} used ticks remain accounted.`,
       );
-    }
+      yielded = null;
+    };
 
-    if (expired) {
+    const enqueueExpired = () => {
+      if (!expired) return;
+      expired.boostProtected = false;
       expired.quantumUsed = 0;
       if (config.algorithm === "mlfq") {
         const previousLevel = expired.queueLevel;
@@ -276,7 +240,51 @@ export function simulate(
         queues[0].push(expired);
         events.push(`${expired.id}'s quantum expired; it moved to the back of the ready queue.`);
       }
+      expired = null;
+    };
+
+    // When an MLFQ allotment expires on the exact boost boundary, account for
+    // the expiry and enqueue the process first. The subsequent boost then
+    // moves that queued process to Q0 in the same deterministic order shown by
+    // the visualizer.
+    if (boostDue && config.algorithm === "mlfq") {
+      enqueueYielded();
+      enqueueExpired();
+
+      const boosted = queues.flat();
+      for (const queue of queues) queue.length = 0;
+      for (const process of boosted) {
+        process.queueLevel = 0;
+        process.quantumUsed = 0;
+        process.boostProtected = false;
+        queues[0].push(process);
+      }
+
+      if (running) {
+        running.boostProtected = running.queueLevel > 0;
+        const allotted = config.mlfqQuanta[running.queueLevel];
+        events.push(
+          `Priority boost moved ${boosted.length} waiting process${boosted.length === 1 ? "" : "es"} to Q0; ${running.id} remained on the CPU in Q${running.queueLevel} with ${running.quantumUsed}/${allotted} ticks used.`,
+        );
+      } else if (boosted.length > 0) {
+        events.push(
+          `Priority boost moved ${boosted.length} waiting process${boosted.length === 1 ? "" : "es"} to Q0.`,
+        );
+      }
     }
+
+    const arrivals = processes.filter(
+      (process) => process.arrivalTime === time && process.remainingTime > 0,
+    );
+    for (const process of arrivals) {
+      process.queueLevel = 0;
+      process.quantumUsed = 0;
+      queues[0].push(process);
+      events.push(`${process.id} arrived and joined ${queueCount > 1 ? "Q0" : "the ready queue"}.`);
+    }
+
+    enqueueYielded();
+    enqueueExpired();
 
     if (running && config.algorithm === "stcf" && queues[0].length > 0) {
       const contender = queues[0].reduce((best, process) =>
@@ -292,12 +300,13 @@ export function simulate(
       }
     }
 
-    if (running && config.algorithm === "mlfq") {
+    if (running && config.algorithm === "mlfq" && !running.boostProtected) {
       const higherQueueReady = queues.some(
         (queue, index) => index < running!.queueLevel && queue.length > 0,
       );
       if (higherQueueReady) {
         events.push(`${running.id} was preempted by a process in a higher-priority queue.`);
+        running.boostProtected = false;
         queues[running.queueLevel].unshift(running);
         running = null;
       }
@@ -306,6 +315,7 @@ export function simulate(
     if (!running) {
       running = chooseNext(config.algorithm, queues);
       if (running) {
+        running.boostProtected = false;
         if (running.firstRunTime === null) running.firstRunTime = time;
         events.push(`${running.id} was selected as ${describeAlgorithm(config.algorithm)}.`);
       }

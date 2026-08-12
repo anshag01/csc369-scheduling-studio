@@ -77,29 +77,36 @@ describe("scheduling visualization mirrors simulator snapshots", () => {
         snapshot.readyQueues.forEach((queue, index) => {
           expect(attribute(queueTags[index], "data-testid")).toBe(`ready-queue-${index}`);
           expect(attribute(queueTags[index], "data-ready-ids")).toBe(queue.join(","));
-          expect(attribute(queueTags[index], "data-running-id")).toBe(
-            snapshot.runningQueueLevel === index ? snapshot.running : "",
-          );
+          expect(attribute(queueTags[index], "data-running-id")).toBeNull();
         });
 
-        const runningMapTags = [...html.matchAll(/<div class="queue-chip(?: mlfq-queue-chip)? running-queue-chip"[^>]*>/g)]
+        const cpuProcessTags = [...html.matchAll(/<div class="queue-chip cpu-process-card"[^>]*>/g)]
           .map((match) => match[0]);
         if (snapshot.running) {
           const runningView = snapshot.processes.find((process) => process.id === snapshot.running)!;
-          expect(runningMapTags).toHaveLength(1);
-          expect(attribute(runningMapTags[0], "data-process-id")).toBe(snapshot.running);
-          expect(attribute(runningMapTags[0], "data-state")).toBe("running");
-          expect(attribute(runningMapTags[0], "data-queue-level")).toBe(String(runningView.queueLevel));
-          expect(attribute(runningMapTags[0], "data-remaining")).toBe(String(runningView.remainingTime));
-          expect(attribute(runningMapTags[0], "data-allotment-used")).toBe(
+          expect(cpuProcessTags).toHaveLength(1);
+          expect(attribute(cpuProcessTags[0], "data-process-id")).toBe(snapshot.running);
+          expect(attribute(cpuProcessTags[0], "data-state")).toBe("running");
+          expect(attribute(cpuProcessTags[0], "data-motion-place")).toBe("cpu");
+          expect(attribute(cpuProcessTags[0], "data-queue-level")).toBe(String(runningView.queueLevel));
+          expect(attribute(cpuProcessTags[0], "data-remaining")).toBe(String(runningView.remainingTime));
+          expect(attribute(cpuProcessTags[0], "data-allotment-used")).toBe(
             algorithm === "mlfq" ? String(runningView.allotmentUsed) : null,
           );
-          expect(attribute(runningMapTags[0], "data-quantum-used")).toBe(
+          expect(attribute(cpuProcessTags[0], "data-quantum-used")).toBe(
             algorithm === "rr" ? String(runningView.allotmentUsed) : null,
           );
+          expect(snapshot.readyQueues.flat()).not.toContain(snapshot.running);
         } else {
-          expect(runningMapTags).toHaveLength(0);
+          expect(cpuProcessTags).toHaveLength(0);
         }
+
+        const visibleProcessCards = [...html.matchAll(/data-motion-id="([^"]+)"/g)].map((match) => match[1]);
+        expect(visibleProcessCards.sort()).toEqual(
+          snapshot.processes.filter((process) => process.state === "ready" || process.state === "running").map((process) => process.id).sort(),
+        );
+        expect(new Set(visibleProcessCards).size).toBe(visibleProcessCards.length);
+        expect(html).toContain("data-motion-finish-target");
 
         const metricRows = [...html.matchAll(/<tr data-process-id="[^"]+"[^>]*>/g)].map((match) => match[0]);
         expect(metricRows).toHaveLength(snapshot.processes.length);
@@ -138,6 +145,7 @@ describe("scheduling visualization mirrors simulator snapshots", () => {
     expect(html).not.toContain("State &amp; metrics");
     expect(html).toContain('data-testid="state-counts"');
     expect(html).toContain("Priority feedback map");
+    expect(html).toContain("READY STATE");
     expect([...html.matchAll(/data-testid="ready-queue-\d+"/g)]).toHaveLength(3);
   });
 

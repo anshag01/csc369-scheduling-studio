@@ -82,31 +82,166 @@ test("every lecture policy renders every CPU boundary and state exactly", async 
   }
 });
 
-test("the running process remains visible in the scheduler map for every policy", async ({ page }) => {
+test("the running process appears only on the CPU for every policy", async ({ page }) => {
   for (const algorithm of ["fcfs", "sjf", "stcf", "rr", "mlfq"] as const) {
     await page.locator("#algorithm").selectOption(algorithm);
     await page.getByRole("button", { name: "Next time step" }).click();
 
-    const runningMapChip = page.locator(".running-queue-chip");
-    await expect(runningMapChip).toHaveCount(1);
-    await expect(runningMapChip).toHaveAttribute("data-process-id", "A");
-    await expect(runningMapChip).toHaveAttribute("data-state", "running");
-    await expect(runningMapChip).toHaveAttribute("data-queue-level", "0");
-    await expect(runningMapChip).toHaveAttribute("data-remaining", "2");
-    await expect(runningMapChip).toContainText("A");
-    await expect(runningMapChip).toContainText("ON CPU");
-    await expect(runningMapChip).toContainText("2 left");
+    const cpuProcessCard = page.getByTestId("cpu-process-card");
+    await expect(cpuProcessCard).toHaveCount(1);
+    await expect(cpuProcessCard).toHaveAttribute("data-process-id", "A");
+    await expect(cpuProcessCard).toHaveAttribute("data-state", "running");
+    await expect(cpuProcessCard).toHaveAttribute("data-motion-place", "cpu");
+    await expect(cpuProcessCard).toHaveAttribute("data-queue-level", "0");
+    await expect(cpuProcessCard).toHaveAttribute("data-remaining", "2");
+    await expect(cpuProcessCard).toContainText("A");
+    await expect(cpuProcessCard).toContainText("ON CPU");
+    await expect(cpuProcessCard).toContainText("2 ticks remaining");
     await expect(page.getByTestId("ready-queue-0")).toHaveAttribute("data-ready-ids", "");
-    await expect(page.getByTestId("ready-queue-0")).toHaveAttribute("data-running-id", "A");
+    await expect(page.locator('.queue-track [data-state="running"]')).toHaveCount(0);
 
     if (algorithm === "rr") {
-      await expect(runningMapChip).toHaveAttribute("data-quantum-used", "1");
-      await expect(runningMapChip).toContainText("1/2 slice");
+      await expect(cpuProcessCard).toHaveAttribute("data-quantum-used", "1");
+      await expect(cpuProcessCard).toContainText("1/2 quantum used");
     } else if (algorithm === "mlfq") {
-      await expect(runningMapChip).toHaveAttribute("data-allotment-used", "1");
-      await expect(runningMapChip).toContainText("1/2 used");
+      await expect(cpuProcessCard).toHaveAttribute("data-allotment-used", "1");
+      await expect(cpuProcessCard).toContainText("1/2 allotment used");
     }
   }
+});
+
+test("process cards animate every scheduler transfer and reverse step without duplicates", async ({ page }) => {
+  await page.locator("#algorithm").selectOption("rr");
+  await page.locator(".json-panel summary").click();
+  await page.getByLabel("Scenario JSON").fill(JSON.stringify({
+    processes: [
+      { id: "A", arrivalTime: 0, serviceTime: 4 },
+      { id: "B", arrivalTime: 0, serviceTime: 4 },
+    ],
+  }));
+  await page.getByRole("button", { name: "Import", exact: true }).click();
+
+  await page.locator('[data-timeline-time="1"]').click();
+  await page.getByRole("button", { name: "Next time step" }).click();
+  const dashboard = page.locator(".dashboard-grid");
+  await expect(dashboard).toHaveAttribute("data-last-motion-count", "2");
+  await expect(dashboard).toHaveAttribute("data-last-motion-types", /ready->cpu/);
+  await expect(dashboard).toHaveAttribute("data-last-motion-types", /cpu->ready/);
+  await expect(page.locator('[data-motion-id="A"]')).toHaveCount(1);
+  await expect(page.locator('[data-motion-id="B"]')).toHaveCount(1);
+
+  await page.getByRole("button", { name: "Previous time step" }).click();
+  await expect(dashboard).toHaveAttribute("data-last-motion-types", /ready->cpu/);
+  await expect(dashboard).toHaveAttribute("data-last-motion-types", /cpu->ready/);
+  await expect(page.locator('[data-motion-id="A"]')).toHaveCount(1);
+  await expect(page.locator('[data-motion-id="B"]')).toHaveCount(1);
+});
+
+test("completion and MLFQ boosts have complete, destination-based animations", async ({ page }) => {
+  const json = page.getByLabel("Scenario JSON");
+  await page.locator(".json-panel summary").click();
+  await json.fill(JSON.stringify({ processes: [{ id: "A", arrivalTime: 0, serviceTime: 1 }] }));
+  await page.getByRole("button", { name: "Import", exact: true }).click();
+  await page.getByRole("button", { name: "Next time step" }).click();
+  await expect(page.locator(".dashboard-grid")).toHaveAttribute("data-last-motion-types", "cpu->finished");
+  await page.waitForTimeout(650);
+  await expect(page.locator(".process-motion-ghost")).toHaveCount(0);
+
+  await json.fill(JSON.stringify({
+    processes: [
+      { id: "A", arrivalTime: 0, serviceTime: 10 },
+      { id: "B", arrivalTime: 0, serviceTime: 5 },
+    ],
+  }));
+  await page.getByRole("button", { name: "Import", exact: true }).click();
+  await page.locator("#algorithm").selectOption("mlfq");
+  await page.getByRole("spinbutton", { name: "Q0" }).fill("1");
+  await page.getByRole("spinbutton", { name: "Q1" }).fill("4");
+  await page.getByRole("spinbutton", { name: "Q2" }).fill("8");
+  await page.getByRole("spinbutton", { name: "Boost ticks" }).fill("4");
+  await page.locator('[data-timeline-time="3"]').click();
+  await page.getByRole("button", { name: "Next time step" }).click();
+
+  await expect(page.getByTestId("cpu-process-card")).toHaveAttribute("data-process-id", "A");
+  await expect(page.getByTestId("cpu-process-card")).toContainText("Q1 · 2/4 allotment used");
+  await expect(page.getByTestId("ready-queue-0")).toHaveAttribute("data-ready-ids", "B");
+  await expect(page.locator(".dashboard-grid")).toHaveAttribute("data-last-motion-types", /q1->q0/);
+  await expect(page.getByTestId("event-list")).toContainText("A remained on the CPU in Q1");
+});
+
+test("MLFQ demotion and higher-priority preemption animate to their exact destinations", async ({ page }) => {
+  await page.locator(".json-panel summary").click();
+  await page.getByLabel("Scenario JSON").fill(JSON.stringify({
+    processes: [
+      { id: "A", arrivalTime: 0, serviceTime: 8 },
+      { id: "C", arrivalTime: 0, serviceTime: 4 },
+    ],
+  }));
+  await page.getByRole("button", { name: "Import", exact: true }).click();
+  await page.locator("#algorithm").selectOption("mlfq");
+  await page.getByRole("spinbutton", { name: "Q0" }).fill("2");
+  await page.getByRole("spinbutton", { name: "Q1" }).fill("4");
+  await page.getByRole("spinbutton", { name: "Q2" }).fill("8");
+  await page.getByRole("spinbutton", { name: "Boost ticks" }).fill("100");
+
+  await page.locator('[data-timeline-time="1"]').click();
+  await page.getByRole("button", { name: "Next time step" }).click();
+  const dashboard = page.locator(".dashboard-grid");
+  await expect(dashboard).toHaveAttribute("data-last-motion-types", /cpu->q1/);
+  await expect(dashboard).toHaveAttribute("data-last-motion-types", /q0->cpu/);
+  await expect(page.getByTestId("cpu-process-card")).toHaveAttribute("data-process-id", "C");
+  await expect(page.getByTestId("ready-queue-1")).toHaveAttribute("data-ready-ids", "A");
+
+  await page.getByLabel("Scenario JSON").fill(JSON.stringify({
+    processes: [
+      { id: "A", arrivalTime: 0, serviceTime: 8 },
+      { id: "B", arrivalTime: 2, serviceTime: 1 },
+    ],
+  }));
+  await page.getByRole("button", { name: "Import", exact: true }).click();
+  await page.getByRole("spinbutton", { name: "Q0" }).fill("1");
+  await page.locator('[data-timeline-time="1"]').click();
+  await page.getByRole("button", { name: "Next time step" }).click();
+  await expect(dashboard).toHaveAttribute("data-last-motion-types", /cpu->q1/);
+  await expect(dashboard).toHaveAttribute("data-last-motion-types", /arrival->cpu/);
+  await expect(page.getByTestId("cpu-process-card")).toHaveAttribute("data-process-id", "B");
+  await expect(page.getByTestId("ready-queue-1")).toHaveAttribute("data-ready-ids", "A");
+  await expect(page.getByTestId("event-list")).toContainText("A was preempted by a process in a higher-priority queue");
+  await expect(page.locator('[data-motion-id="A"]')).toHaveCount(1);
+  await expect(page.locator('[data-motion-id="B"]')).toHaveCount(1);
+});
+
+test("an immediately redispatched process still shows its intermediate queue movement", async ({ page }) => {
+  await page.locator(".json-panel summary").click();
+  await page.getByLabel("Scenario JSON").fill(JSON.stringify({
+    processes: [{ id: "A", arrivalTime: 0, serviceTime: 5 }],
+  }));
+  await page.getByRole("button", { name: "Import", exact: true }).click();
+
+  await page.locator("#algorithm").selectOption("rr");
+  await page.getByRole("spinbutton", { name: "Time quantum" }).fill("1");
+  await page.getByRole("button", { name: "Next time step" }).click();
+  const dashboard = page.locator(".dashboard-grid");
+  await expect(dashboard).toHaveAttribute("data-last-motion-types", "cpu->ready->cpu");
+  await expect(page.getByTestId("cpu-process-card")).toHaveAttribute("data-process-id", "A");
+  await expect(page.getByTestId("ready-queue-0")).toHaveAttribute("data-ready-ids", "");
+
+  await page.locator("#algorithm").selectOption("mlfq");
+  await page.getByRole("spinbutton", { name: "Q0" }).fill("1");
+  await page.getByRole("spinbutton", { name: "Boost ticks" }).fill("100");
+  await page.getByRole("button", { name: "Next time step" }).click();
+  await expect(dashboard).toHaveAttribute("data-last-motion-types", "cpu->q1->cpu");
+  await expect(page.getByTestId("cpu-process-card")).toContainText("Q1 · 0/4 allotment used");
+  await expect(page.getByTestId("ready-queue-1")).toHaveAttribute("data-ready-ids", "");
+
+  await page.getByRole("spinbutton", { name: "Q0" }).fill("2");
+  await page.getByRole("spinbutton", { name: "Boost ticks" }).fill("2");
+  await page.getByRole("button", { name: "Next time step" }).click();
+  await page.getByRole("button", { name: "Next time step" }).click();
+  await expect(dashboard).toHaveAttribute("data-last-motion-types", "cpu->q1->q0->cpu");
+  await expect(page.getByTestId("cpu-process-card")).toContainText("Q0 · 0/2 allotment used");
+  await expect(page.getByTestId("event-list")).toContainText("moved from Q0 to Q1");
+  await expect(page.getByTestId("event-list")).toContainText("Priority boost moved 1 waiting process to Q0");
 });
 
 test("playback, keyboard stepping, reset, and timeline inspection stay synchronized", async ({ page }) => {
@@ -150,19 +285,19 @@ test("a priority boost never renews the running Q0 Round Robin turn", async ({ p
 
   await page.locator('[data-timeline-time="3"]').click();
   await expect(page.locator(".dashboard-grid")).toHaveAttribute("data-running-process", "B");
-  await expect(page.locator(".running-content")).toContainText("Q0 · 1/2 used");
-  const runningMapChip = page.locator(".running-queue-chip");
-  await expect(runningMapChip).toHaveCount(1);
-  await expect(runningMapChip).toHaveAttribute("data-process-id", "B");
-  await expect(runningMapChip).toHaveAttribute("data-queue-level", "0");
-  await expect(runningMapChip).toHaveAttribute("data-remaining", "5");
-  await expect(runningMapChip).toHaveAttribute("data-allotment-used", "1");
-  await expect(runningMapChip).toContainText("ON CPU");
-  await expect(runningMapChip).toContainText("5 left · 1/2 used");
+  const cpuProcessCard = page.getByTestId("cpu-process-card");
+  await expect(cpuProcessCard).toContainText("Q0 · 1/2 allotment used");
+  await expect(cpuProcessCard).toHaveCount(1);
+  await expect(cpuProcessCard).toHaveAttribute("data-process-id", "B");
+  await expect(cpuProcessCard).toHaveAttribute("data-queue-level", "0");
+  await expect(cpuProcessCard).toHaveAttribute("data-remaining", "5");
+  await expect(cpuProcessCard).toHaveAttribute("data-allotment-used", "1");
+  await expect(cpuProcessCard).toContainText("ON CPU");
+  await expect(cpuProcessCard).toContainText("5 ticks remaining");
   await expect(page.getByTestId("ready-queue-0")).toHaveAttribute("data-ready-ids", "A");
-  await expect(page.getByTestId("ready-queue-0")).toHaveAttribute("data-running-id", "B");
+  await expect(page.locator('.queue-track [data-process-id="B"]')).toHaveCount(0);
   await expect(page.getByTestId("event-list")).toContainText(
-    "B's in-progress Q0 allotment was preserved",
+    "B remained on the CPU in Q0 with 1/2 ticks used",
   );
 
   await page.getByRole("button", { name: "Next time step" }).click();

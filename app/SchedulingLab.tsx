@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { RefObject, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Algorithm, ProcessDefinition, simulate, validateProcesses } from "../lib/simulator";
 
 const palette = ["#4f6bed", "#8e63ce", "#d18b38", "#d15f5f", "#328ea8", "#667085"];
@@ -39,9 +39,177 @@ const algorithmGuidance: Record<Algorithm, { rule: string; detail: string }> = {
   },
   mlfq: {
     rule: "Run the highest queue; use round robin among processes at the same level.",
-    detail: "Full allotment demotes. Boosts return active work to Q0 without renewing an in-progress Q0 turn.",
+    detail: "Full allotment demotes. Boosts move waiting work to Q0 while the current CPU turn continues unchanged.",
   },
 };
+
+type MotionPoint = {
+  rect: DOMRect;
+  place: string;
+  color: string;
+};
+
+function useProcessMotion(
+  rootRef: RefObject<HTMLDivElement | null>,
+  frameKey: string,
+  contextKey: string,
+  duration: number,
+  events: string[],
+) {
+  const previous = useRef(new Map<string, MotionPoint>());
+  const previousContext = useRef(contextKey);
+
+  useLayoutEffect(() => {
+    const root = rootRef.current;
+    if (!root) return;
+
+    const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const nodes = [...root.querySelectorAll<HTMLElement>("[data-motion-id]")];
+    const current = new Map<string, MotionPoint>();
+    for (const node of nodes) {
+      const id = node.dataset.motionId;
+      if (!id) continue;
+      current.set(id, {
+        rect: node.getBoundingClientRect(),
+        place: node.dataset.motionPlace ?? "unknown",
+        color: node.dataset.motionColor ?? "#4f6bed",
+      });
+    }
+
+    if (previousContext.current !== contextKey || previous.current.size === 0) {
+      previous.current = current;
+      previousContext.current = contextKey;
+      root.dataset.lastMotionCount = "0";
+      root.dataset.lastMotionTypes = "";
+      return;
+    }
+
+    const movements: string[] = [];
+    if (!reducedMotion) {
+      for (const node of nodes) {
+        const id = node.dataset.motionId;
+        const next = id ? current.get(id) : null;
+        const before = id ? previous.current.get(id) : null;
+        if (!id || !next) continue;
+
+        if (!before) {
+          node.animate(
+            [
+              { opacity: 0, transform: "translateY(7px) scale(.9)" },
+              { opacity: 1, transform: "translateY(0) scale(1)" },
+            ],
+            { duration: Math.min(320, duration), easing: "cubic-bezier(.2,.8,.2,1)" },
+          );
+          movements.push(`arrival->${next.place}`);
+          continue;
+        }
+
+        const deltaX = before.rect.left - next.rect.left;
+        const deltaY = before.rect.top - next.rect.top;
+        const scaleX = before.rect.width / Math.max(1, next.rect.width);
+        const scaleY = before.rect.height / Math.max(1, next.rect.height);
+        if (before.place === next.place && next.place === "cpu") continue;
+        if (before.place === next.place && Math.abs(deltaX) < 1 && Math.abs(deltaY) < 1) continue;
+        if (Math.abs(deltaX) < 1 && Math.abs(deltaY) < 1 && Math.abs(scaleX - 1) < .02 && Math.abs(scaleY - 1) < .02) continue;
+
+        node.animate(
+          [
+            {
+              transform: `translate(${deltaX}px, ${deltaY}px) scale(${scaleX}, ${scaleY})`,
+              transformOrigin: "top left",
+              boxShadow: "0 12px 28px rgba(32,33,35,.2)",
+              zIndex: 30,
+            },
+            {
+              transform: "translate(0, 0) scale(1, 1)",
+              transformOrigin: "top left",
+              boxShadow: "0 3px 8px rgba(0,0,0,.045)",
+              zIndex: 1,
+            },
+          ],
+          { duration, easing: "cubic-bezier(.2,.75,.2,1)" },
+        );
+        movements.push(`${before.place}->${next.place}`);
+      }
+
+      // If one process exhausts a turn and is immediately selected again, its
+      // start and end snapshots both place it on the CPU. Animate the real
+      // intermediate enqueue/demotion path so that event is not visually lost.
+      for (const node of nodes) {
+        const id = node.dataset.motionId;
+        const before = id ? previous.current.get(id) : null;
+        const next = id ? current.get(id) : null;
+        if (!id || before?.place !== "cpu" || next?.place !== "cpu") continue;
+        const processEvent = events.find((event) =>
+          event.startsWith(`${id} `) || event.startsWith(`${id}'s `),
+        );
+        if (!processEvent) continue;
+
+        const demotion = processEvent.match(/(?:moved from Q\d+ to|returned to) Q(\d+)/);
+        const yieldLevel = processEvent.match(/gave up the CPU one tick early at Q(\d+)/);
+        const destinations: string[] = [];
+        if (demotion) destinations.push(`q${demotion[1]}`);
+        else if (yieldLevel) destinations.push(`q${yieldLevel[1]}`);
+        else if (processEvent.includes("quantum expired")) destinations.push("ready");
+        else continue;
+
+        const wasBoosted = events.some((event) => event.startsWith("Priority boost moved"));
+        if (wasBoosted && destinations.at(-1) !== "q0") destinations.push("q0");
+
+        const keyframes: Keyframe[] = [{ transform: "translate(0, 0) scale(1)", offset: 0 }];
+        destinations.forEach((destination, index) => {
+          const queueIndex = destination === "ready" ? 0 : Number(destination.slice(1));
+          const targetNode = root.querySelector<HTMLElement>(`[data-testid="ready-queue-${queueIndex}"]`);
+          if (!targetNode) return;
+          const target = targetNode.getBoundingClientRect();
+          const deltaX = target.left + Math.min(target.width / 2, 105) - (next.rect.left + next.rect.width / 2);
+          const deltaY = target.top + target.height / 2 - (next.rect.top + next.rect.height / 2);
+          keyframes.push({
+            transform: `translate(${deltaX}px, ${deltaY}px) scale(.62)`,
+            offset: (index + 1) / (destinations.length + 1),
+          });
+        });
+        keyframes.push({ transform: "translate(0, 0) scale(1)", offset: 1 });
+        node.animate(keyframes, { duration, easing: "cubic-bezier(.4,0,.2,1)" });
+        movements.push(`cpu->${destinations.join("->")}->cpu`);
+      }
+
+      const finishTarget = root.querySelector<HTMLElement>("[data-motion-finish-target]");
+      if (finishTarget) {
+        const target = finishTarget.getBoundingClientRect();
+        for (const [id, before] of previous.current) {
+          if (current.has(id)) continue;
+          const ghost = document.createElement("div");
+          ghost.className = "process-motion-ghost";
+          ghost.textContent = id;
+          ghost.style.setProperty("--process-color", before.color);
+          ghost.style.left = `${before.rect.left}px`;
+          ghost.style.top = `${before.rect.top}px`;
+          ghost.style.width = `${before.rect.width}px`;
+          ghost.style.height = `${before.rect.height}px`;
+          document.body.appendChild(ghost);
+          const deltaX = target.left + target.width / 2 - (before.rect.left + before.rect.width / 2);
+          const deltaY = target.top + target.height / 2 - (before.rect.top + before.rect.height / 2);
+          const animation = ghost.animate(
+            [
+              { opacity: 1, transform: "translate(0, 0) scale(1)" },
+              { opacity: .15, transform: `translate(${deltaX}px, ${deltaY}px) scale(.28)` },
+            ],
+            { duration, easing: "cubic-bezier(.4,0,.2,1)" },
+          );
+          animation.finished.finally(() => ghost.remove());
+          movements.push(`${before.place}->finished`);
+        }
+      }
+    }
+
+    root.dataset.lastMotionCount = String(movements.length);
+    root.dataset.lastMotionTypes = movements.join(",");
+    root.dispatchEvent(new CustomEvent("scheduling-motion", { detail: movements }));
+    previous.current = current;
+    previousContext.current = contextKey;
+  }, [contextKey, duration, events, frameKey, rootRef]);
+}
 
 function wholeNumber(value: string, minimum: number) {
   const parsed = Number(value);
@@ -84,6 +252,7 @@ export default function SchedulingLab({
   const [showMetrics, setShowMetrics] = useState(initialShowMetrics);
   const [jsonText, setJsonText] = useState("");
   const [jsonMessage, setJsonMessage] = useState("");
+  const dashboardRef = useRef<HTMLDivElement>(null);
 
   const validationError = validateProcesses(processes);
   const result = useMemo(
@@ -167,6 +336,15 @@ export default function SchedulingLab({
   const averageWaiting = mean(snapshot?.processes.map((process) => process.waitingTime) ?? []);
   const averageResponse = mean(snapshot?.processes.flatMap((process) => process.responseTime === null ? [] : [process.responseTime]) ?? []);
   const averageTurnaround = mean(snapshot?.processes.flatMap((process) => process.turnaroundTime === null ? [] : [process.turnaroundTime]) ?? []);
+  const motionContext = useMemo(
+    () => JSON.stringify({ algorithm, processes, quantum, mlfqQuanta, mlfqBoostInterval }),
+    [algorithm, mlfqBoostInterval, mlfqQuanta, processes, quantum],
+  );
+  const motionFrame = snapshot
+    ? `${snapshot.time}:${snapshot.running ?? "idle"}:${snapshot.readyQueues.map((queue) => queue.join(".")).join("|")}`
+    : "invalid";
+  const motionDuration = Math.min(560, Math.max(220, speed - 120));
+  useProcessMotion(dashboardRef, motionFrame, motionContext, motionDuration, snapshot?.events ?? []);
 
   return (
     <main className="app-shell">
@@ -233,44 +411,42 @@ export default function SchedulingLab({
           </div>
 
           {!snapshot ? <div className="empty-state"><span>!</span><h2>Check the scenario</h2><p>{validationError}</p></div> : <>
-            <div className={`dashboard-grid ${algorithm === "mlfq" ? "mlfq-dashboard" : ""} ${showMetrics ? "metrics-visible" : "metrics-hidden"}`} data-snapshot-time={snapshot.time} data-running-process={snapshot.running ?? ""} data-running-remaining={snapshot.runningRemaining ?? ""}>
+            <div ref={dashboardRef} className={`dashboard-grid ${algorithm === "mlfq" ? "mlfq-dashboard" : ""} ${showMetrics ? "metrics-visible" : "metrics-hidden"}`} data-snapshot-time={snapshot.time} data-running-process={snapshot.running ?? ""} data-running-remaining={snapshot.runningRemaining ?? ""} data-motion-duration={motionDuration}>
             <div className="status-grid">
               <article className="cpu-card" data-running-process={snapshot.running ?? ""} data-running-queue={snapshot.runningQueueLevel ?? ""}><div className="card-label"><span className="live-dot" />CPU · RUNNING</div>
-                {runningProcess ? <div className="running-content"><div className="process-orb" style={{ background: runningProcess.color }}>{runningProcess.id}</div><div><p>Executing now</p><h2>Process {runningProcess.id}</h2><span>{snapshot.runningRemaining} tick{snapshot.runningRemaining === 1 ? "" : "s"} remaining{algorithm === "mlfq" && runningView ? ` · Q${runningView.queueLevel} · ${runningView.allotmentUsed}/${mlfqQuanta[runningView.queueLevel]} used` : ""}</span>{algorithm === "mlfq" && runningView && <div className="running-allotment" title={`${runningView.allotmentUsed} of ${mlfqQuanta[runningView.queueLevel]} allotted ticks used`}><i style={{ width: `${runningView.allotmentUsed / mlfqQuanta[runningView.queueLevel] * 100}%` }} /><small>demote at {mlfqQuanta[runningView.queueLevel]}</small></div>}</div></div> : <div className="idle-content"><div className="process-orb idle">—</div><div><p>Nothing dispatched</p><h2>CPU idle</h2><span>Waiting for work</span></div></div>}
+                {runningProcess && runningView ? <div className="running-content"><div
+                  className="queue-chip cpu-process-card"
+                  data-testid="cpu-process-card"
+                  data-process-id={runningView.id}
+                  data-state="running"
+                  data-queue-level={runningView.queueLevel}
+                  data-remaining={runningView.remainingTime}
+                  data-allotment-used={algorithm === "mlfq" ? runningView.allotmentUsed : undefined}
+                  data-quantum-used={algorithm === "rr" ? runningView.allotmentUsed : undefined}
+                  data-motion-id={runningView.id}
+                  data-motion-place="cpu"
+                  data-motion-color={runningProcess.color}
+                  style={{ "--process-color": runningProcess.color } as React.CSSProperties}
+                >
+                  <div className="cpu-process-heading"><strong>{runningView.id}</strong><em>ON CPU</em></div>
+                  <span>{runningView.remainingTime} tick{runningView.remainingTime === 1 ? "" : "s"} remaining</span>
+                  {algorithm === "mlfq" && <small>Q{runningView.queueLevel} · {runningView.allotmentUsed}/{mlfqQuanta[runningView.queueLevel]} allotment used</small>}
+                  {algorithm === "rr" && <small>{runningView.allotmentUsed}/{quantum} quantum used</small>}
+                  {(algorithm === "mlfq" || algorithm === "rr") && <i className="allotment-meter" aria-hidden="true"><b style={{ width: `${runningView.allotmentUsed / (algorithm === "mlfq" ? mlfqQuanta[runningView.queueLevel] : quantum) * 100}%` }} /></i>}
+                </div><div className="cpu-process-copy"><p>Executing now</p><h2>Process {runningProcess.id}</h2><span>Only on the CPU—not in a ready queue</span></div></div> : <div className="idle-content"><div className="process-orb idle">—</div><div><p>Nothing dispatched</p><h2>CPU idle</h2><span>Waiting for work</span></div></div>}
                 <div className="cpu-progress"><span style={{ width: runningProcess ? `${((runningProcess.serviceTime - (snapshot.runningRemaining ?? 0)) / runningProcess.serviceTime) * 100}%` : "0%", background: runningProcess?.color }} /></div>
               </article>
               <article className="event-card"><div className="card-label">AT THIS TIME BOUNDARY</div><div className="event-list" data-testid="event-list" data-event-count={snapshot.events.length}>{snapshot.events.length ? snapshot.events.map((event, index) => <p key={index}><span>{index + 1}</span>{event}</p>) : <p className="muted-event">No scheduling decision was needed.</p>}</div></article>
             </div>
 
-            <section className="queue-section card-surface"><div className="card-title-row"><div><p className="eyebrow">SCHEDULER STATE</p><h2>{algorithm === "mlfq" ? "Priority feedback map" : "CPU & ready queue"}</h2></div><div className="queue-summary"><span data-testid="state-counts" data-new-count={futureCount} data-ready-count={waitingCount} data-finished-count={completedCount}>{futureCount} future · {waitingCount} waiting · {completedCount} finished</span>{algorithm === "mlfq" && <div className="boost-countdown" title={`All active processes return to Q0 in ${boostTicksRemaining} ticks`}><i className="boost-ring" style={{ "--boost-progress": `${boostProgress}%` } as React.CSSProperties}><b>{boostTicksRemaining}</b></i><span><strong>NEXT BOOST</strong><small>ticks remaining</small></span></div>}</div></div>
+            <section className="queue-section card-surface"><div className="card-title-row"><div><p className="eyebrow">READY STATE</p><h2>{algorithm === "mlfq" ? "Priority feedback map" : "Ready queue"}</h2></div><div className="queue-summary"><span data-testid="state-counts" data-new-count={futureCount} data-ready-count={waitingCount} data-finished-count={completedCount}>{futureCount} future · {waitingCount} waiting · <b data-motion-finish-target>{completedCount} finished</b></span>{algorithm === "mlfq" && <div className="boost-countdown" title={`Waiting processes return to Q0 in ${boostTicksRemaining} ticks`}><i className="boost-ring" style={{ "--boost-progress": `${boostProgress}%` } as React.CSSProperties}><b>{boostTicksRemaining}</b></i><span><strong>NEXT BOOST</strong><small>ticks remaining</small></span></div>}</div></div>
               <div className={algorithm === "mlfq" ? "multi-queues" : "single-queue"}>{snapshot.readyQueues.map((queue, queueIndex) => {
-                const isRunningLevel = snapshot.running !== null && snapshot.runningQueueLevel === queueIndex;
-                const runningInLevel = isRunningLevel ? runningView : null;
                 const allotted = mlfqQuanta[queueIndex];
-                return <div className={`queue-row ${isRunningLevel ? "active-queue" : ""}`} key={queueIndex}>
-                  {algorithm === "mlfq" && <div className="queue-label"><div><strong>Q{queueIndex}</strong>{isRunningLevel && <em>CPU ACTIVE</em>}</div><span>{queueIndex === 0 ? "Highest" : queueIndex === snapshot.readyQueues.length - 1 ? "Lowest" : "Medium"} · allotment {mlfqQuanta[queueIndex]}</span>{queueIndex < snapshot.readyQueues.length - 1 && <i className="demotion-cue">full allotment ↓</i>}</div>}
-                  <div className="queue-track" data-testid={`ready-queue-${queueIndex}`} data-ready-ids={queue.join(",")} data-running-id={runningInLevel?.id ?? ""}>
+                return <div className="queue-row" key={queueIndex}>
+                  {algorithm === "mlfq" && <div className="queue-label"><div><strong>Q{queueIndex}</strong></div><span>{queueIndex === 0 ? "Highest" : queueIndex === snapshot.readyQueues.length - 1 ? "Lowest" : "Medium"} · allotment {mlfqQuanta[queueIndex]}</span>{queueIndex < snapshot.readyQueues.length - 1 && <i className="demotion-cue">full allotment ↓</i>}</div>}
+                  <div className="queue-track" data-testid={`ready-queue-${queueIndex}`} data-ready-ids={queue.join(",")}>
                     <span className="queue-head">HEAD</span>
-                    {runningInLevel && runningProcess && <div
-                      className={`queue-chip ${algorithm === "mlfq" ? "mlfq-queue-chip " : ""}running-queue-chip`}
-                      data-process-id={runningInLevel.id}
-                      data-state="running"
-                      data-queue-level={queueIndex}
-                      data-remaining={runningInLevel.remainingTime}
-                      data-allotment-used={algorithm === "mlfq" ? runningInLevel.allotmentUsed : undefined}
-                      data-quantum-used={algorithm === "rr" ? runningInLevel.allotmentUsed : undefined}
-                      style={{ "--process-color": runningProcess.color } as React.CSSProperties}
-                      title={algorithm === "mlfq"
-                        ? `${runningInLevel.id} is on the CPU at Q${queueIndex}; ${runningInLevel.allotmentUsed} of ${allotted} ticks used`
-                        : algorithm === "rr"
-                          ? `${runningInLevel.id} is on the CPU; ${runningInLevel.allotmentUsed} of ${quantum} quantum ticks used`
-                          : `${runningInLevel.id} is on the CPU with ${runningInLevel.remainingTime} ticks remaining`}
-                    >
-                      <strong>{runningInLevel.id}<em>ON CPU</em></strong>
-                      <span>{runningInLevel.remainingTime} left{algorithm === "mlfq" ? ` · ${runningInLevel.allotmentUsed}/${allotted} used` : algorithm === "rr" ? ` · ${runningInLevel.allotmentUsed}/${quantum} slice` : ""}</span>
-                      {(algorithm === "mlfq" || algorithm === "rr") && <i className="allotment-meter" aria-hidden="true"><b style={{ width: `${runningInLevel.allotmentUsed / (algorithm === "mlfq" ? allotted : quantum) * 100}%` }} /></i>}
-                    </div>}
-                    {queue.length === 0 && !runningInLevel ? <span className="empty-queue">Queue empty</span> : queue.map((id, index) => { const process = processById.get(id)!; const view = snapshot.processes.find((item) => item.id === id); const used = view?.allotmentUsed ?? 0; return <div className={`queue-chip ${algorithm === "mlfq" ? "mlfq-queue-chip" : ""}`} data-process-id={id} data-state="ready" data-remaining={view?.remainingTime} data-allotment-used={algorithm === "mlfq" ? used : undefined} key={`${id}-${index}`} style={{ "--process-color": process.color } as React.CSSProperties} title={algorithm === "mlfq" ? `${id}: ${used} of ${allotted} ticks used at Q${queueIndex}` : undefined}><strong>{id}</strong><span>{view?.remainingTime} left{algorithm === "mlfq" ? ` · ${used}/${allotted} used` : ""}</span>{algorithm === "mlfq" && <i className="allotment-meter" aria-hidden="true"><b style={{ width: `${used / allotted * 100}%` }} /></i>}</div>; })}
+                    {queue.length === 0 ? <span className="empty-queue">Queue empty</span> : queue.map((id) => { const process = processById.get(id)!; const view = snapshot.processes.find((item) => item.id === id); const used = view?.allotmentUsed ?? 0; return <div className={`queue-chip ${algorithm === "mlfq" ? "mlfq-queue-chip" : ""}`} data-process-id={id} data-state="ready" data-remaining={view?.remainingTime} data-allotment-used={algorithm === "mlfq" ? used : undefined} data-motion-id={id} data-motion-place={algorithm === "mlfq" ? `q${queueIndex}` : "ready"} data-motion-color={process.color} key={id} style={{ "--process-color": process.color } as React.CSSProperties} title={algorithm === "mlfq" ? `${id}: ${used} of ${allotted} ticks used at Q${queueIndex}` : undefined}><strong>{id}</strong><span>{view?.remainingTime} left{algorithm === "mlfq" ? ` · ${used}/${allotted} used` : ""}</span>{algorithm === "mlfq" && <i className="allotment-meter" aria-hidden="true"><b style={{ width: `${used / allotted * 100}%` }} /></i>}</div>; })}
                     <span className="queue-tail">TAIL</span>
                   </div>
                 </div>;

@@ -106,6 +106,7 @@ function referenceMlfqTimeline(
       remaining: process.serviceTime,
       level: 0,
       used: 0,
+      protected: false,
     }))
     .sort((left, right) => left.arrivalTime - right.arrivalTime || left.index - right.index);
   const queues: Array<typeof jobs> = Array.from({ length: quanta.length }, () => []);
@@ -117,23 +118,7 @@ function referenceMlfqTimeline(
 
     let expired: (typeof jobs)[number] | null = null;
     let yielded: (typeof jobs)[number] | null = null;
-    if (time > 0 && time % boostInterval === 0) {
-      const active = queues.flat();
-      const continuingTopTurn =
-        running !== null && running.level === 0 && running.used < quanta[0];
-      queues.forEach((queue) => queue.splice(0));
-      for (const job of active) {
-        job.level = 0;
-        job.used = 0;
-        queues[0].push(job);
-      }
-      if (running && !continuingTopTurn) {
-        running.level = 0;
-        running.used = 0;
-        queues[0].push(running);
-        running = null;
-      }
-    } else if (running) {
+    if (running) {
       const allotment = quanta[running.level];
       if (running.used === allotment) {
         expired = running;
@@ -144,6 +129,31 @@ function referenceMlfqTimeline(
       }
     }
 
+    const boostDue = time > 0 && time % boostInterval === 0;
+    if (boostDue) {
+      if (yielded) {
+        yielded.protected = false;
+        queues[yielded.level].push(yielded);
+        yielded = null;
+      }
+      if (expired) {
+        expired.protected = false;
+        expired.used = 0;
+        expired.level = Math.min(expired.level + 1, quanta.length - 1);
+        queues[expired.level].push(expired);
+        expired = null;
+      }
+      const waiting = queues.flat();
+      queues.forEach((queue) => queue.splice(0));
+      for (const job of waiting) {
+        job.level = 0;
+        job.used = 0;
+        job.protected = false;
+        queues[0].push(job);
+      }
+      if (running) running.protected = running.level > 0;
+    }
+
     for (const job of jobs) {
       if (job.arrivalTime === time && job.remaining > 0) {
         job.level = 0;
@@ -151,20 +161,25 @@ function referenceMlfqTimeline(
         queues[0].push(job);
       }
     }
-    if (yielded) queues[yielded.level].push(yielded);
+    if (yielded) {
+      yielded.protected = false;
+      queues[yielded.level].push(yielded);
+    }
     if (expired) {
+      expired.protected = false;
       expired.used = 0;
       expired.level = Math.min(expired.level + 1, quanta.length - 1);
       queues[expired.level].push(expired);
     }
 
-    if (running && queues.slice(0, running.level).some((queue) => queue.length > 0)) {
+    if (running && !running.protected && queues.slice(0, running.level).some((queue) => queue.length > 0)) {
       queues[running.level].unshift(running);
       running = null;
     }
     if (!running) {
       const nextQueue = queues.find((queue) => queue.length > 0);
       running = nextQueue?.shift() ?? null;
+      if (running) running.protected = false;
     }
 
     result.push(running?.id ?? "-");
@@ -254,9 +269,8 @@ function assertSimulationInvariants(
       const running = snapshot.processes.find((process) => process.id === snapshot.running)!;
       expect(running.state).toBe("running");
       expect(running.remainingTime).toBeGreaterThan(0);
-      if (simulationConfig.algorithm === "mlfq") {
-        expect(snapshot.readyQueues.slice(0, running.queueLevel).flat()).toHaveLength(0);
-      }
+      // A lower-level process may intentionally finish its current turn while
+      // newly boosted work waits in Q0.
     }
 
     if (simulationConfig.algorithm === "mlfq") {
@@ -274,9 +288,9 @@ function assertSimulationInvariants(
         simulationConfig.mlfqBoostInterval &&
         snapshot.time % simulationConfig.mlfqBoostInterval === 0
       ) {
-        for (const process of snapshot.processes.filter((item) => item.state !== "finished")) {
+        for (const process of snapshot.processes.filter((item) => item.state === "ready")) {
           expect(process.queueLevel).toBe(0);
-          if (process.state === "ready") expect(process.allotmentUsed).toBe(0);
+          expect(process.allotmentUsed).toBe(0);
         }
       }
     }
@@ -471,7 +485,7 @@ describe("comprehensive scheduling verification", () => {
     );
   });
 
-  it("boosts only active work without renewing a running Q0 turn or duplicating a process", () => {
+  it("boosts waiting work without renewing the running turn or duplicating a process", () => {
     const simulationConfig: SimulationConfig = {
       algorithm: "mlfq",
       quantum: 2,
@@ -482,7 +496,7 @@ describe("comprehensive scheduling verification", () => {
     const result = simulate(processes, simulationConfig);
     assertSimulationInvariants(processes, simulationConfig);
     expect(result.snapshots[4].events.some((event) =>
-      event.startsWith("Priority boost moved 2 active processes to Q0"),
+      event.startsWith("Priority boost moved 1 waiting process to Q0"),
     )).toBe(true);
     expect(result.snapshots[4].processes.find((process) => process.id === "A")?.state).toBe("finished");
   });

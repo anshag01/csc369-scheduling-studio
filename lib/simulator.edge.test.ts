@@ -144,16 +144,16 @@ describe("scheduler edge cases and failure containment", () => {
     expect(result.snapshots[4].processes.find((item) => item.id === "A")?.allotmentUsed).toBe(1);
   });
 
-  it("boosts only unfinished work while preserving an in-progress Q0 turn", () => {
+  it("boosts waiting work while preserving the running process's current turn", () => {
     const result = simulate(
       [process("A", 0, 1), process("B", 0, 12), process("C", 2, 5)],
       config("mlfq", { mlfqQuanta: [1, 3, 6], mlfqBoostInterval: 4 }),
     );
     const boost = result.snapshots[4];
     expect(boost.processes.find((item) => item.id === "A")?.state).toBe("finished");
-    for (const active of boost.processes.filter((item) => item.state !== "finished")) {
+    for (const active of boost.processes.filter((item) => item.state === "ready")) {
       expect(active.queueLevel).toBe(0);
-      if (active.state === "ready") expect(active.allotmentUsed).toBe(0);
+      expect(active.allotmentUsed).toBe(0);
     }
     expect(new Set(boost.readyQueues.flat()).size).toBe(boost.readyQueues.flat().length);
   });
@@ -174,12 +174,67 @@ describe("scheduler edge cases and failure containment", () => {
     expect(result.snapshots[3].running).toBe("B");
     expect(result.snapshots[3].processes.find((item) => item.id === "B")?.allotmentUsed).toBe(1);
     expect(result.snapshots[3].events).toContain(
-      "Priority boost moved 2 active processes to Q0; B's in-progress Q0 allotment was preserved.",
+      "Priority boost moved 1 waiting process to Q0; B remained on the CPU in Q0 with 1/2 ticks used.",
     );
     expect(result.snapshots[4].events).toContain(
       "B used its full allotment and moved from Q0 to Q1.",
     );
     expect(result.snapshots[4].running).toBe("A");
+  });
+
+  it("lets a running Q1 process finish its existing allotment after a boost", () => {
+    const result = simulate(
+      [process("A", 0, 10), process("B", 0, 5)],
+      config("mlfq", { mlfqQuanta: [1, 4, 8], mlfqBoostInterval: 4 }),
+    );
+
+    expect(result.timeline.slice(2, 7).map((slice) => slice.processId).join("")).toBe("AAAAB");
+    expect(result.snapshots[4].running).toBe("A");
+    expect(result.snapshots[4].processes.find((item) => item.id === "A")).toMatchObject({
+      queueLevel: 1,
+      allotmentUsed: 2,
+      state: "running",
+    });
+    expect(result.snapshots[4].readyQueues[0]).toEqual(["B"]);
+    expect(result.snapshots[4].events).toContain(
+      "Priority boost moved 1 waiting process to Q0; A remained on the CPU in Q1 with 2/4 ticks used.",
+    );
+    expect(result.snapshots[6].events).toContain(
+      "A used its full allotment and moved from Q1 to Q2.",
+    );
+  });
+
+  it("lets a running Q2 process finish its existing allotment after a boost", () => {
+    const result = simulate(
+      [process("A", 0, 10), process("B", 0, 5)],
+      config("mlfq", { mlfqQuanta: [1, 1, 4], mlfqBoostInterval: 5 }),
+    );
+
+    expect(result.snapshots[5].running).toBe("A");
+    expect(result.snapshots[5].processes.find((item) => item.id === "A")).toMatchObject({
+      queueLevel: 2,
+      allotmentUsed: 1,
+      state: "running",
+    });
+    expect(result.snapshots[5].readyQueues[0]).toEqual(["B"]);
+    expect(result.timeline.slice(4, 8).map((slice) => slice.processId).join("")).toBe("AAAA");
+  });
+
+  it("demotes an expired process before boosting it at the same boundary", () => {
+    const result = simulate(
+      [process("A", 0, 5), process("B", 0, 5)],
+      config("mlfq", { mlfqQuanta: [1, 3], mlfqBoostInterval: 2 }),
+    );
+    const boundary = result.snapshots[2];
+
+    expect(boundary.events[0]).toBe("B used its full allotment and moved from Q0 to Q1.");
+    expect(boundary.events[1]).toBe("Priority boost moved 2 waiting processes to Q0.");
+    expect(boundary.running).toBe("A");
+    expect(boundary.readyQueues[0]).toEqual(["B"]);
+    expect(boundary.processes.find((item) => item.id === "B")).toMatchObject({
+      queueLevel: 0,
+      allotmentUsed: 0,
+    });
   });
 
   it("does not mutate caller-owned process definitions and is deterministic", () => {

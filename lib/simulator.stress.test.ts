@@ -13,6 +13,7 @@ type ReferenceJob = ProcessDefinition & {
   remaining: number;
   level: number;
   used: number;
+  protected: boolean;
 };
 
 type ReferenceSnapshot = {
@@ -69,6 +70,7 @@ function referenceSimulation(
       remaining: process.serviceTime,
       level: 0,
       used: 0,
+      protected: false,
     }))
     .sort(stableOrder);
   const queueCount = config.algorithm === "mlfq" ? config.mlfqQuanta.length : 1;
@@ -88,25 +90,7 @@ function referenceSimulation(
       time > 0 &&
       time % config.mlfqBoostInterval === 0;
 
-    if (boostDue) {
-      const active = queues.flat();
-      const continuingTopTurn =
-        running !== null &&
-        running.level === 0 &&
-        running.used < config.mlfqQuanta[0];
-      for (const queue of queues) queue.length = 0;
-      for (const job of active) {
-        job.level = 0;
-        job.used = 0;
-        queues[0].push(job);
-      }
-      if (running && !continuingTopTurn) {
-        running.level = 0;
-        running.used = 0;
-        queues[0].push(running);
-        running = null;
-      }
-    } else if (config.algorithm === "rr" && running && running.used >= config.quantum) {
+    if (config.algorithm === "rr" && running && running.used >= config.quantum) {
       expired = running;
       running = null;
     } else if (config.algorithm === "mlfq" && running) {
@@ -124,6 +108,30 @@ function referenceSimulation(
       }
     }
 
+    if (boostDue) {
+      if (yielded) {
+        yielded.protected = false;
+        queues[yielded.level].push(yielded);
+        yielded = null;
+      }
+      if (expired) {
+        expired.protected = false;
+        expired.used = 0;
+        expired.level = Math.min(expired.level + 1, queueCount - 1);
+        queues[expired.level].push(expired);
+        expired = null;
+      }
+      const waiting = queues.flat();
+      for (const queue of queues) queue.length = 0;
+      for (const job of waiting) {
+        job.level = 0;
+        job.used = 0;
+        job.protected = false;
+        queues[0].push(job);
+      }
+      if (running) running.protected = running.level > 0;
+    }
+
     for (const job of jobs) {
       if (job.arrivalTime === time && job.remaining > 0) {
         job.level = 0;
@@ -132,8 +140,12 @@ function referenceSimulation(
       }
     }
 
-    if (yielded) queues[yielded.level].push(yielded);
+    if (yielded) {
+      yielded.protected = false;
+      queues[yielded.level].push(yielded);
+    }
     if (expired) {
+      expired.protected = false;
       expired.used = 0;
       if (config.algorithm === "mlfq") {
         expired.level = Math.min(expired.level + 1, queueCount - 1);
@@ -153,6 +165,7 @@ function referenceSimulation(
     if (
       config.algorithm === "mlfq" &&
       running &&
+      !running.protected &&
       queues.slice(0, running.level).some((queue) => queue.length > 0)
     ) {
       queues[running.level].unshift(running);
@@ -173,6 +186,7 @@ function referenceSimulation(
       } else {
         running = queues[0].shift() ?? null;
       }
+      if (running) running.protected = false;
     }
 
     snapshots.push({
@@ -295,9 +309,8 @@ function assertScenario(
       const running = snapshot.processes.find((process) => process.id === snapshot.running)!;
       check(snapshot.runningRemaining === running.remainingTime, `Running remainder summary is stale at boundary ${time}.`);
       check(snapshot.runningQueueLevel === running.queueLevel, `Running queue summary is stale at boundary ${time}.`);
-      if (config.algorithm === "mlfq") {
-        check(snapshot.readyQueues.slice(0, running.queueLevel).every((queue) => queue.length === 0), `MLFQ ran below a non-empty higher-priority queue at boundary ${time}.`);
-      }
+      // After a boost, the current lower-level turn is intentionally allowed
+      // to finish while boosted work waits in Q0.
     } else {
       check(snapshot.runningRemaining === null, `Idle CPU exposes a running remainder at boundary ${time}.`);
       check(snapshot.runningQueueLevel === null, `Idle CPU exposes a running queue at boundary ${time}.`);
@@ -311,11 +324,9 @@ function assertScenario(
     }
 
     if (config.algorithm === "mlfq" && config.mlfqBoostInterval && time > 0 && time % config.mlfqBoostInterval === 0) {
-      for (const view of snapshot.processes.filter((process) => process.state === "ready" || process.state === "running")) {
+      for (const view of snapshot.processes.filter((process) => process.state === "ready")) {
         check(view.queueLevel === 0, `Boost failed to move active process ${view.id} to Q0 at boundary ${time}.`);
-        if (view.state === "ready") {
-          check(view.allotmentUsed === 0, `Boost failed to reset queued process ${view.id} at boundary ${time}.`);
-        }
+        check(view.allotmentUsed === 0, `Boost failed to reset queued process ${view.id} at boundary ${time}.`);
       }
     }
 
