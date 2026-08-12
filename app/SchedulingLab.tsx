@@ -55,15 +55,26 @@ function useProcessMotion(
   contextKey: string,
   duration: number,
   events: string[],
+  step: number,
+  setMotionCue: (value: string | null) => void,
+  setMotionBusy: (value: boolean) => void,
 ) {
   const previous = useRef(new Map<string, MotionPoint>());
   const previousContext = useRef(contextKey);
+  const previousStep = useRef(step);
+  const previousEvents = useRef(events);
+  const finishTimer = useRef<number | null>(null);
 
   useLayoutEffect(() => {
     const root = rootRef.current;
     if (!root) return;
 
+    if (finishTimer.current !== null) window.clearTimeout(finishTimer.current);
+    document.querySelectorAll(".process-motion-arrow, .process-motion-ghost").forEach((element) => element.remove());
+
     const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const direction = step >= previousStep.current ? "forward" : "backward";
+    const transitionEvents = direction === "forward" ? events : previousEvents.current;
     const nodes = [...root.querySelectorAll<HTMLElement>("[data-motion-id]")];
     const current = new Map<string, MotionPoint>();
     for (const node of nodes) {
@@ -79,13 +90,138 @@ function useProcessMotion(
     if (previousContext.current !== contextKey || previous.current.size === 0) {
       previous.current = current;
       previousContext.current = contextKey;
+      previousStep.current = step;
+      previousEvents.current = events;
       root.dataset.lastMotionCount = "0";
       root.dataset.lastMotionTypes = "";
+      root.dataset.lastMotionLabels = "";
+      setMotionCue(null);
+      setMotionBusy(false);
+      return;
+    }
+
+    // A timeline click can jump across several boundaries. Drawing one direct
+    // transfer would falsely imply that the skipped intermediate states never
+    // happened, so only adjacent forward/backward steps receive route motion.
+    if (Math.abs(step - previousStep.current) !== 1) {
+      previous.current = current;
+      previousStep.current = step;
+      previousEvents.current = events;
+      root.dataset.lastMotionCount = "0";
+      root.dataset.lastMotionTypes = "";
+      root.dataset.lastMotionLabels = "";
+      setMotionCue(null);
+      setMotionBusy(false);
       return;
     }
 
     const movements: string[] = [];
+    const cues: string[] = [];
+    type Action = "dispatch" | "demote" | "boost" | "preempt" | "rotate" | "yield" | "finish" | "arrive" | "reorder" | "return";
+    const placeLabel = (place: string) => {
+      if (place === "cpu") return "CPU";
+      if (place === "ready") return "ready tail";
+      if (place === "finished") return "finished";
+      if (place === "future") return "not arrived";
+      return place.toUpperCase();
+    };
+    const classify = (id: string, from: string, to: string): Action => {
+      const relevant = transitionEvents.filter((event) =>
+        event.startsWith(`${id} `) || event.startsWith(`${id}'s `),
+      ).join(" ");
+      if (to === "finished") return "finish";
+      if (from === "future") return "arrive";
+      if (to === "cpu") return "dispatch";
+      if (from === "cpu") {
+        if (relevant.includes("preempted")) return "preempt";
+        if (relevant.includes("gave up the CPU")) return "yield";
+        if (relevant.includes("quantum expired")) return "rotate";
+        if (relevant.includes("full allotment")) return "demote";
+        return "return";
+      }
+      if (to === "q0" && transitionEvents.some((event) => event.startsWith("Priority boost moved"))) return "boost";
+      if (from === to) return "reorder";
+      return "return";
+    };
+    const actionLabel = (action: Action) => ({
+      dispatch: "DISPATCH",
+      demote: "DEMOTE",
+      boost: "PRIORITY BOOST",
+      preempt: "PREEMPT",
+      rotate: "QUANTUM EXPIRED",
+      yield: "YIELD",
+      finish: "FINISH",
+      arrive: "ARRIVE",
+      reorder: "QUEUE ROTATION",
+      return: "RETURN",
+    })[action];
+    const center = (rect: DOMRect) => ({ x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 });
+    const queuePoint = (place: string) => {
+      const queueIndex = place === "ready" ? 0 : Number(place.slice(1));
+      const queue = root.querySelector<HTMLElement>(`[data-testid="ready-queue-${queueIndex}"]`);
+      if (!queue) return null;
+      const rect = queue.getBoundingClientRect();
+      return { x: rect.left + Math.min(rect.width * .32, 125), y: rect.top + rect.height / 2 };
+    };
+    const showArrow = (
+      from: { x: number; y: number },
+      to: { x: number; y: number },
+      id: string,
+      action: Action,
+      delay = 0,
+      arrowDuration = duration,
+      reverse = false,
+    ) => {
+      const deltaX = to.x - from.x;
+      const deltaY = to.y - from.y;
+      const distance = Math.hypot(deltaX, deltaY);
+      if (distance < 12) return;
+      // Give simultaneous opposite-direction transfers their own visual lanes.
+      // Since the perpendicular reverses with the arrow direction, CPU -> queue
+      // and queue -> CPU no longer draw directly on top of one another.
+      const laneOffset = Math.min(14, Math.max(9, distance * .035));
+      const normalX = -deltaY / distance * laneOffset;
+      const normalY = deltaX / distance * laneOffset;
+      const start = { x: from.x + normalX, y: from.y + normalY };
+      const angle = Math.atan2(deltaY, deltaX);
+      const arrow = document.createElement("div");
+      arrow.className = `process-motion-arrow action-${action}`;
+      arrow.dataset.motionAction = action;
+      arrow.dataset.motionProcessId = id;
+      arrow.setAttribute("aria-hidden", "true");
+      arrow.style.left = `${start.x}px`;
+      arrow.style.top = `${start.y}px`;
+      arrow.style.width = `${distance}px`;
+      arrow.style.transform = `rotate(${angle}rad)`;
+      arrow.style.setProperty("--label-counter-rotate", `${-angle}rad`);
+      const line = document.createElement("i");
+      const label = document.createElement("span");
+      label.textContent = `${reverse ? "UNDO " : ""}${actionLabel(action)} · ${id}`;
+      arrow.append(line, label);
+      document.body.appendChild(arrow);
+      const drawTime = Math.min(150, Math.max(70, arrowDuration * .22));
+      line.animate(
+        [{ transform: "scaleX(0)" }, { transform: "scaleX(1)" }],
+        { delay, duration: drawTime, fill: "both", easing: "ease-out" },
+      );
+      const animation = arrow.animate(
+        [
+          { opacity: 0, offset: 0 },
+          { opacity: 1, offset: .14 },
+          { opacity: 1, offset: .78 },
+          { opacity: 0, offset: 1 },
+        ],
+        { delay, duration: arrowDuration, fill: "both", easing: "linear" },
+      );
+      animation.finished.finally(() => arrow.remove());
+    };
+    const recordCue = (id: string, action: Action, destination: string, reverse = false) => {
+      cues.push(`${id} ${reverse ? "undoes " : ""}${actionLabel(action).toLowerCase()} → ${placeLabel(destination)}`);
+    };
     if (!reducedMotion) {
+      const finishTarget = root.querySelector<HTMLElement>("[data-motion-finish-target]");
+      const futureTarget = root.querySelector<HTMLElement>("[data-motion-future-target]");
+      const arrowLead = Math.min(145, Math.max(70, duration * .2));
       for (const node of nodes) {
         const id = node.dataset.motionId;
         const next = id ? current.get(id) : null;
@@ -93,14 +229,50 @@ function useProcessMotion(
         if (!id || !next) continue;
 
         if (!before) {
-          node.animate(
-            [
-              { opacity: 0, transform: "translateY(7px) scale(.9)" },
-              { opacity: 1, transform: "translateY(0) scale(1)" },
-            ],
-            { duration: Math.min(320, duration), easing: "cubic-bezier(.2,.8,.2,1)" },
-          );
-          movements.push(`arrival->${next.place}`);
+          const destination = center(next.rect);
+          if (direction === "backward" && finishTarget) {
+            const source = center(finishTarget.getBoundingClientRect());
+            showArrow(source, destination, id, "finish", 0, duration, true);
+            node.animate(
+              [
+                { opacity: .25, transform: `translate(${source.x - destination.x}px, ${source.y - destination.y}px) scale(.3)` },
+                { opacity: 1, transform: "translate(0, 0) scale(1)" },
+              ],
+              { delay: arrowLead, duration: duration - arrowLead, fill: "backwards", easing: "cubic-bezier(.2,.8,.2,1)" },
+            );
+            movements.push(`finished->${next.place}`);
+            recordCue(id, "finish", next.place, true);
+          } else if (next.place === "cpu") {
+            const waitingPlace = root.querySelector('[data-testid="ready-queue-0"]') ? (root.querySelector(".multi-queues") ? "q0" : "ready") : "ready";
+            const queue = queuePoint(waitingPlace) ?? { x: destination.x, y: destination.y + 55 };
+            const source = { x: queue.x, y: queue.y - 42 };
+            const half = duration / 2;
+            showArrow(source, queue, id, "arrive", 0, half);
+            showArrow(queue, destination, id, "dispatch", half, half);
+            node.animate(
+              [
+                { opacity: 0, transform: `translate(${source.x - destination.x}px, ${source.y - destination.y}px) scale(.62)`, offset: 0 },
+                { opacity: 1, transform: `translate(${queue.x - destination.x}px, ${queue.y - destination.y}px) scale(.62)`, offset: .5 },
+                { opacity: 1, transform: "translate(0, 0) scale(1)", offset: 1 },
+              ],
+              { duration, fill: "backwards", easing: "cubic-bezier(.4,0,.2,1)" },
+            );
+            movements.push(`arrival->${waitingPlace}->cpu`);
+            recordCue(id, "arrive", waitingPlace);
+            recordCue(id, "dispatch", "cpu");
+          } else {
+            const source = { x: destination.x, y: destination.y - 42 };
+            showArrow(source, destination, id, "arrive");
+            node.animate(
+              [
+                { opacity: 0, transform: "translateY(-42px) scale(.78)" },
+                { opacity: 1, transform: "translateY(0) scale(1)" },
+              ],
+              { delay: arrowLead, duration: duration - arrowLead, fill: "backwards", easing: "cubic-bezier(.2,.8,.2,1)" },
+            );
+            movements.push(`arrival->${next.place}`);
+            recordCue(id, "arrive", next.place);
+          }
           continue;
         }
 
@@ -112,6 +284,11 @@ function useProcessMotion(
         if (before.place === next.place && Math.abs(deltaX) < 1 && Math.abs(deltaY) < 1) continue;
         if (Math.abs(deltaX) < 1 && Math.abs(deltaY) < 1 && Math.abs(scaleX - 1) < .02 && Math.abs(scaleY - 1) < .02) continue;
 
+        const forwardFrom = direction === "forward" ? before.place : next.place;
+        const forwardTo = direction === "forward" ? next.place : before.place;
+        const action = classify(id, forwardFrom, forwardTo);
+        showArrow(center(before.rect), center(next.rect), id, action, 0, duration, direction === "backward");
+        recordCue(id, action, next.place, direction === "backward");
         node.animate(
           [
             {
@@ -127,7 +304,7 @@ function useProcessMotion(
               zIndex: 1,
             },
           ],
-          { duration, easing: "cubic-bezier(.2,.75,.2,1)" },
+          { delay: arrowLead, duration: duration - arrowLead, fill: "backwards", easing: "cubic-bezier(.2,.75,.2,1)" },
         );
         movements.push(`${before.place}->${next.place}`);
       }
@@ -140,7 +317,7 @@ function useProcessMotion(
         const before = id ? previous.current.get(id) : null;
         const next = id ? current.get(id) : null;
         if (!id || before?.place !== "cpu" || next?.place !== "cpu") continue;
-        const processEvent = events.find((event) =>
+        const processEvent = transitionEvents.find((event) =>
           event.startsWith(`${id} `) || event.startsWith(`${id}'s `),
         );
         if (!processEvent) continue;
@@ -148,37 +325,48 @@ function useProcessMotion(
         const demotion = processEvent.match(/(?:moved from Q\d+ to|returned to) Q(\d+)/);
         const yieldLevel = processEvent.match(/gave up the CPU one tick early at Q(\d+)/);
         const destinations: string[] = [];
-        if (demotion) destinations.push(`q${demotion[1]}`);
-        else if (yieldLevel) destinations.push(`q${yieldLevel[1]}`);
-        else if (processEvent.includes("quantum expired")) destinations.push("ready");
+        let firstAction: Action;
+        if (demotion) { destinations.push(`q${demotion[1]}`); firstAction = "demote"; }
+        else if (yieldLevel) { destinations.push(`q${yieldLevel[1]}`); firstAction = "yield"; }
+        else if (processEvent.includes("quantum expired")) { destinations.push("ready"); firstAction = "rotate"; }
         else continue;
 
-        const wasBoosted = events.some((event) => event.startsWith("Priority boost moved"));
+        const wasBoosted = transitionEvents.some((event) => event.startsWith("Priority boost moved"));
         if (wasBoosted && destinations.at(-1) !== "q0") destinations.push("q0");
 
+        const visualDestinations = direction === "forward" ? destinations : [...destinations].reverse();
+        const forwardActions: Action[] = [firstAction];
+        if (destinations.length > 1) forwardActions.push("boost");
+        forwardActions.push("dispatch");
+        const visualActions = direction === "forward" ? forwardActions : [...forwardActions].reverse();
+        const routePoints = [center(next.rect), ...visualDestinations.map((destination) => queuePoint(destination) ?? center(next.rect)), center(next.rect)];
+        const segmentDuration = duration / Math.max(1, routePoints.length - 1);
+        for (let index = 0; index < routePoints.length - 1; index += 1) {
+          const destination = index < visualDestinations.length ? visualDestinations[index] : "cpu";
+          showArrow(routePoints[index], routePoints[index + 1], id, visualActions[index], index * segmentDuration, segmentDuration, direction === "backward");
+          recordCue(id, visualActions[index], destination, direction === "backward");
+        }
+
         const keyframes: Keyframe[] = [{ transform: "translate(0, 0) scale(1)", offset: 0 }];
-        destinations.forEach((destination, index) => {
-          const queueIndex = destination === "ready" ? 0 : Number(destination.slice(1));
-          const targetNode = root.querySelector<HTMLElement>(`[data-testid="ready-queue-${queueIndex}"]`);
-          if (!targetNode) return;
-          const target = targetNode.getBoundingClientRect();
-          const deltaX = target.left + Math.min(target.width / 2, 105) - (next.rect.left + next.rect.width / 2);
-          const deltaY = target.top + target.height / 2 - (next.rect.top + next.rect.height / 2);
+        visualDestinations.forEach((destination, index) => {
+          const target = queuePoint(destination) ?? center(next.rect);
+          const destinationCenter = center(next.rect);
           keyframes.push({
-            transform: `translate(${deltaX}px, ${deltaY}px) scale(.62)`,
-            offset: (index + 1) / (destinations.length + 1),
+            transform: `translate(${target.x - destinationCenter.x}px, ${target.y - destinationCenter.y}px) scale(.62)`,
+            offset: (index + 1) / (visualDestinations.length + 1),
           });
         });
         keyframes.push({ transform: "translate(0, 0) scale(1)", offset: 1 });
         node.animate(keyframes, { duration, easing: "cubic-bezier(.4,0,.2,1)" });
-        movements.push(`cpu->${destinations.join("->")}->cpu`);
+        movements.push(`cpu->${visualDestinations.join("->")}->cpu`);
       }
 
-      const finishTarget = root.querySelector<HTMLElement>("[data-motion-finish-target]");
-      if (finishTarget) {
-        const target = finishTarget.getBoundingClientRect();
+      const disappearanceTarget = direction === "forward" ? finishTarget : futureTarget;
+      if (disappearanceTarget) {
+        const target = disappearanceTarget.getBoundingClientRect();
         for (const [id, before] of previous.current) {
           if (current.has(id)) continue;
+          const action: Action = direction === "forward" ? "finish" : "arrive";
           const ghost = document.createElement("div");
           ghost.className = "process-motion-ghost";
           ghost.textContent = id;
@@ -190,25 +378,45 @@ function useProcessMotion(
           document.body.appendChild(ghost);
           const deltaX = target.left + target.width / 2 - (before.rect.left + before.rect.width / 2);
           const deltaY = target.top + target.height / 2 - (before.rect.top + before.rect.height / 2);
+          showArrow(center(before.rect), center(target), id, action, 0, duration, direction === "backward");
+          recordCue(id, action, direction === "forward" ? "finished" : "future", direction === "backward");
           const animation = ghost.animate(
             [
               { opacity: 1, transform: "translate(0, 0) scale(1)" },
               { opacity: .15, transform: `translate(${deltaX}px, ${deltaY}px) scale(.28)` },
             ],
-            { duration, easing: "cubic-bezier(.4,0,.2,1)" },
+            { delay: arrowLead, duration: duration - arrowLead, fill: "backwards", easing: "cubic-bezier(.4,0,.2,1)" },
           );
           animation.finished.finally(() => ghost.remove());
-          movements.push(`${before.place}->finished`);
+          movements.push(`${before.place}->${direction === "forward" ? "finished" : "future"}`);
         }
       }
     }
 
     root.dataset.lastMotionCount = String(movements.length);
     root.dataset.lastMotionTypes = movements.join(",");
+    root.dataset.lastMotionLabels = cues.join(" | ");
     root.dispatchEvent(new CustomEvent("scheduling-motion", { detail: movements }));
+    if (cues.length > 0 && !reducedMotion) {
+      setMotionCue(cues.join("  •  "));
+      setMotionBusy(true);
+      finishTimer.current = window.setTimeout(() => {
+        setMotionBusy(false);
+        setMotionCue(null);
+      }, duration + 40);
+    } else {
+      setMotionCue(null);
+      setMotionBusy(false);
+    }
     previous.current = current;
     previousContext.current = contextKey;
-  }, [contextKey, duration, events, frameKey, rootRef]);
+    previousStep.current = step;
+    previousEvents.current = events;
+
+    return () => {
+      if (finishTimer.current !== null) window.clearTimeout(finishTimer.current);
+    };
+  }, [contextKey, duration, events, frameKey, rootRef, setMotionBusy, setMotionCue, step]);
 }
 
 function wholeNumber(value: string, minimum: number) {
@@ -248,10 +456,12 @@ export default function SchedulingLab({
   const [mlfqBoostInterval, setMlfqBoostInterval] = useState(initialMlfqBoostInterval);
   const [step, setStep] = useState(Math.max(0, Math.floor(initialStep)));
   const [playing, setPlaying] = useState(false);
-  const [speed, setSpeed] = useState(800);
+  const [speed, setSpeed] = useState(1200);
   const [showMetrics, setShowMetrics] = useState(initialShowMetrics);
   const [jsonText, setJsonText] = useState("");
   const [jsonMessage, setJsonMessage] = useState("");
+  const [motionCue, setMotionCue] = useState<string | null>(null);
+  const [motionBusy, setMotionBusy] = useState(false);
   const dashboardRef = useRef<HTMLDivElement>(null);
 
   const validationError = validateProcesses(processes);
@@ -276,8 +486,8 @@ export default function SchedulingLab({
     const handleKey = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement;
       if (["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName)) return;
-      if (event.key === "ArrowRight") { setPlaying(false); setStep((current) => Math.min(lastStep, current + 1)); }
-      if (event.key === "ArrowLeft") { setPlaying(false); setStep((current) => Math.max(0, current - 1)); }
+      if (event.key === "ArrowRight" && !motionBusy) { setPlaying(false); setStep((current) => Math.min(lastStep, current + 1)); }
+      if (event.key === "ArrowLeft" && !motionBusy) { setPlaying(false); setStep((current) => Math.max(0, current - 1)); }
       if (event.key === " ") {
         event.preventDefault();
         if (!snapshot) return;
@@ -287,7 +497,7 @@ export default function SchedulingLab({
     };
     window.addEventListener("keydown", handleKey);
     return () => window.removeEventListener("keydown", handleKey);
-  }, [lastStep, playing, snapshot, step]);
+  }, [lastStep, motionBusy, playing, snapshot, step]);
 
   const resetPlayback = () => { setStep(0); setPlaying(false); };
   const updateProcess = (index: number, patch: Partial<ProcessDefinition>) => {
@@ -343,8 +553,8 @@ export default function SchedulingLab({
   const motionFrame = snapshot
     ? `${snapshot.time}:${snapshot.running ?? "idle"}:${snapshot.readyQueues.map((queue) => queue.join(".")).join("|")}`
     : "invalid";
-  const motionDuration = Math.min(560, Math.max(220, speed - 120));
-  useProcessMotion(dashboardRef, motionFrame, motionContext, motionDuration, snapshot?.events ?? []);
+  const motionDuration = Math.min(1500, Math.max(560, speed - 100));
+  useProcessMotion(dashboardRef, motionFrame, motionContext, motionDuration, snapshot?.events ?? [], step, setMotionCue, setMotionBusy);
 
   return (
     <main className="app-shell">
@@ -399,16 +609,17 @@ export default function SchedulingLab({
         <section className="simulation-panel">
           <div className="control-strip">
             <div className="playback-controls" aria-label="Playback controls">
-              <button onClick={() => { setStep(0); setPlaying(false); }} disabled={!snapshot || step === 0} aria-label="Reset to time zero">↺</button>
-              <button onClick={() => { setPlaying(false); setStep((current) => Math.max(0, current - 1)); }} disabled={!snapshot || step === 0} aria-label="Previous time step">←</button>
+              <button onClick={() => { setStep(0); setPlaying(false); }} disabled={!snapshot || step === 0 || motionBusy} aria-label="Reset to time zero">↺</button>
+              <button onClick={() => { setPlaying(false); setStep((current) => Math.max(0, current - 1)); }} disabled={!snapshot || step === 0 || motionBusy} aria-label="Previous time step">←</button>
               <button className="play-button" onClick={() => { if (!playing && step >= lastStep) setStep(0); setPlaying((current) => !current); }} disabled={!snapshot} aria-label={playing ? "Pause simulation" : "Play simulation"}>{playing ? "Ⅱ" : "▶"}</button>
-              <button onClick={() => { setPlaying(false); setStep((current) => Math.min(lastStep, current + 1)); }} disabled={!snapshot || step === lastStep} aria-label="Next time step">→</button>
+              <button onClick={() => { setPlaying(false); setStep((current) => Math.min(lastStep, current + 1)); }} disabled={!snapshot || step === lastStep || motionBusy} aria-label="Next time step">→</button>
             </div>
             <div className="time-readout"><span>TIME</span><strong data-testid="time-value">{snapshot?.time ?? "—"}</strong><span>/ {lastStep}</span></div>
-            <label className="speed-control">Speed<select value={speed} onChange={(event) => setSpeed(Number(event.target.value))}><option value="1400">Slow</option><option value="800">Normal</option><option value="400">Fast</option></select></label>
+            <label className="speed-control">Speed<select value={speed} onChange={(event) => setSpeed(Number(event.target.value))}><option value="1800">Slow</option><option value="1200">Normal</option><option value="700">Fast</option></select></label>
             <button className={`metrics-toggle ${showMetrics ? "active" : ""}`} aria-pressed={showMetrics} onClick={() => setShowMetrics((current) => !current)}>{showMetrics ? "Hide metrics" : "Metrics"}</button>
             <div className="keyboard-hint"><kbd>←</kbd><kbd>→</kbd> step <kbd>space</kbd> play</div>
           </div>
+          {motionCue && <div className="motion-cue" role="status" aria-live="polite"><span>MOVING</span><strong>{motionCue}</strong></div>}
 
           {!snapshot ? <div className="empty-state"><span>!</span><h2>Check the scenario</h2><p>{validationError}</p></div> : <>
             <div ref={dashboardRef} className={`dashboard-grid ${algorithm === "mlfq" ? "mlfq-dashboard" : ""} ${showMetrics ? "metrics-visible" : "metrics-hidden"}`} data-snapshot-time={snapshot.time} data-running-process={snapshot.running ?? ""} data-running-remaining={snapshot.runningRemaining ?? ""} data-motion-duration={motionDuration}>
@@ -439,7 +650,7 @@ export default function SchedulingLab({
               <article className="event-card"><div className="card-label">AT THIS TIME BOUNDARY</div><div className="event-list" data-testid="event-list" data-event-count={snapshot.events.length}>{snapshot.events.length ? snapshot.events.map((event, index) => <p key={index}><span>{index + 1}</span>{event}</p>) : <p className="muted-event">No scheduling decision was needed.</p>}</div></article>
             </div>
 
-            <section className="queue-section card-surface"><div className="card-title-row"><div><p className="eyebrow">READY STATE</p><h2>{algorithm === "mlfq" ? "Priority feedback map" : "Ready queue"}</h2></div><div className="queue-summary"><span data-testid="state-counts" data-new-count={futureCount} data-ready-count={waitingCount} data-finished-count={completedCount}>{futureCount} future · {waitingCount} waiting · <b data-motion-finish-target>{completedCount} finished</b></span>{algorithm === "mlfq" && <div className="boost-countdown" title={`Waiting processes return to Q0 in ${boostTicksRemaining} ticks`}><i className="boost-ring" style={{ "--boost-progress": `${boostProgress}%` } as React.CSSProperties}><b>{boostTicksRemaining}</b></i><span><strong>NEXT BOOST</strong><small>ticks remaining</small></span></div>}</div></div>
+            <section className="queue-section card-surface"><div className="card-title-row"><div><p className="eyebrow">READY STATE</p><h2>{algorithm === "mlfq" ? "Priority feedback map" : "Ready queue"}</h2></div><div className="queue-summary"><span data-testid="state-counts" data-new-count={futureCount} data-ready-count={waitingCount} data-finished-count={completedCount}><b data-motion-future-target>{futureCount} future</b> · {waitingCount} waiting · <b data-motion-finish-target>{completedCount} finished</b></span>{algorithm === "mlfq" && <div className="boost-countdown" title={`Waiting processes return to Q0 in ${boostTicksRemaining} ticks`}><i className="boost-ring" style={{ "--boost-progress": `${boostProgress}%` } as React.CSSProperties}><b>{boostTicksRemaining}</b></i><span><strong>NEXT BOOST</strong><small>ticks remaining</small></span></div>}</div></div>
               <div className={algorithm === "mlfq" ? "multi-queues" : "single-queue"}>{snapshot.readyQueues.map((queue, queueIndex) => {
                 const allotted = mlfqQuanta[queueIndex];
                 return <div className="queue-row" key={queueIndex}>
@@ -463,6 +674,7 @@ export default function SchedulingLab({
                   data-process-id={slice.processId ?? ""}
                   data-boost-boundary={isBoostBoundary ? "true" : undefined}
                   onClick={() => { setPlaying(false); setStep(Math.min(slice.time, lastStep)); }}
+                  disabled={motionBusy}
                   className={`timeline-cell ${slice.time > snapshot.time ? "future" : ""} ${slice.time === snapshot.time ? "active" : ""} ${isBoostBoundary ? "boost-tick" : ""}`}
                   aria-label={`Time ${slice.time}: ${slice.processId ? `process ${slice.processId}` : "idle"}${isBoostBoundary ? "; priority boost" : ""}`}
                 >

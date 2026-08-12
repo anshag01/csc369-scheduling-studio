@@ -85,7 +85,7 @@ input { min-width: 0; padding: 8px 9px; }
 .json-actions button { flex: 1; padding: 7px; color: #4f5b66; background: #fff; border: 1px solid var(--line); border-radius: 5px; font-size: 10px; }
 .json-panel > p { margin: 7px 0 0; color: var(--green); font-size: 10px; }
 
-.simulation-panel { min-width: 0; padding: 20px 24px 34px; overflow: hidden; background-color: var(--paper); background-image: radial-gradient(circle at 1px 1px, rgba(32, 33, 35, .055) 1px, transparent 0), linear-gradient(145deg, rgba(255,255,255,.5), transparent 55%); background-size: 22px 22px, 100% 100%; }
+.simulation-panel { position: relative; min-width: 0; padding: 20px 24px 34px; overflow: hidden; background-color: var(--paper); background-image: radial-gradient(circle at 1px 1px, rgba(32, 33, 35, .055) 1px, transparent 0), linear-gradient(145deg, rgba(255,255,255,.5), transparent 55%); background-size: 22px 22px, 100% 100%; }
 .control-strip { display: flex; align-items: center; gap: 18px; min-height: 56px; margin-bottom: 18px; padding: 8px 12px; background: rgba(255,255,255,.95); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 6px 20px rgba(0, 0, 0, .045); }
 .playback-controls { display: flex; gap: 4px; }
 .playback-controls button { width: 34px; height: 34px; padding: 0; color: #4f4f4a; background: #f2f2ef; border: 1px solid #ddddda; border-radius: 5px; }
@@ -100,6 +100,9 @@ input { min-width: 0; padding: 8px 9px; }
 .metrics-toggle.active { color: #fff; background: #202123; border-color: #202123; }
 .keyboard-hint { color: #9aa1a8; font-size: 9px; }
 kbd { padding: 2px 4px; color: #5d5d58; background: #f1f1ee; border: 1px solid #dcdcd8; border-bottom-width: 2px; border-radius: 3px; font: 9px var(--font-dm-mono), monospace; }
+.motion-cue { position: absolute; z-index: 60; top: 88px; left: 50%; max-width: min(760px, 78%); display: flex; align-items: center; gap: 8px; padding: 6px 11px 6px 7px; color: #fff; background: rgba(32,33,35,.96); border: 1px solid rgba(255,255,255,.2); border-radius: 999px; box-shadow: 0 8px 24px rgba(20,22,28,.2); transform: translateX(-50%); pointer-events: none; white-space: nowrap; }
+.motion-cue span { padding: 3px 6px; color: #202123; background: #fff; border-radius: 999px; font: 700 7px var(--font-dm-mono), monospace; letter-spacing: .08em; }
+.motion-cue strong { min-width: 0; overflow: hidden; font: 500 9px var(--font-dm-mono), monospace; text-overflow: ellipsis; }
 
 .status-grid { display: grid; grid-template-columns: minmax(300px, .9fr) minmax(360px, 1.1fr); gap: 16px; }
 .cpu-card, .event-card, .card-surface { background: rgba(255,255,255,.97); border: 1px solid var(--line); border-radius: 9px; box-shadow: 0 6px 20px rgba(0,0,0,.04); }
@@ -167,6 +170,16 @@ kbd { padding: 2px 4px; color: #5d5d58; background: #f1f1ee; border: 1px solid #
 .empty-queue { margin: auto; color: #a4abb1; font-size: 10px; font-style: italic; }
 [data-motion-id] { position: relative; will-change: transform; }
 .process-motion-ghost { position: fixed; z-index: 9999; display: grid; place-items: center; pointer-events: none; color: var(--ink); background: #fff; border: 1px solid #dededb; border-top: 3px solid var(--process-color); border-radius: 5px; box-shadow: 0 12px 28px rgba(32,33,35,.2); font: 500 13px var(--font-dm-mono), monospace; }
+.process-motion-arrow { --arrow-color: #4f6bed; position: fixed; z-index: 9998; height: 0; color: var(--arrow-color); pointer-events: none; transform-origin: left center; filter: drop-shadow(0 2px 3px rgba(32,33,35,.2)); }
+.process-motion-arrow > i { position: absolute; top: -2px; left: 0; width: 100%; height: 4px; display: block; background: currentColor; border-radius: 999px; transform-origin: left center; }
+.process-motion-arrow > i::after { content: ""; position: absolute; top: 50%; right: -2px; width: 0; height: 0; border-top: 7px solid transparent; border-bottom: 7px solid transparent; border-left: 12px solid currentColor; transform: translateY(-50%); }
+.process-motion-arrow > span { position: absolute; top: -14px; left: 35%; padding: 5px 8px; color: #fff; background: #202123; border: 1px solid rgba(255,255,255,.28); border-radius: 999px; box-shadow: 0 3px 9px rgba(20,22,28,.22); transform: rotate(var(--label-counter-rotate)) translate(-50%, -50%); font: 700 9px var(--font-dm-mono), monospace; letter-spacing: .05em; white-space: nowrap; }
+.process-motion-arrow.action-demote { --arrow-color: #c58b2a; }
+.process-motion-arrow.action-boost { --arrow-color: #7256c7; }
+.process-motion-arrow.action-preempt { --arrow-color: #c64d56; }
+.process-motion-arrow.action-rotate, .process-motion-arrow.action-return, .process-motion-arrow.action-yield { --arrow-color: #64748b; }
+.process-motion-arrow.action-finish { --arrow-color: #202123; }
+.process-motion-arrow.action-arrive { --arrow-color: #328ea8; }
 
 .timeline-scroll { padding: 5px 0 14px; overflow-x: auto; }
 .timeline-grid { position: relative; min-width: max-content; display: grid; align-items: end; padding-top: 17px; }
@@ -181,6 +194,7 @@ kbd { padding: 2px 4px; color: #5d5d58; background: #f1f1ee; border: 1px solid #
 .timeline-cell.active.boost-tick .tick-block { box-shadow: inset 0 0 0 2px var(--accent), 0 5px 12px rgba(22,34,47,.2); }
 .boost-marker { position: absolute; z-index: 3; top: 2px; right: 2px; padding: 1px 2px; color: #fff; background: #202123; border-radius: 2px; font: 500 5px/1.2 var(--font-dm-mono), monospace; letter-spacing: .02em; pointer-events: none; }
 .timeline-cell.future .boost-marker { opacity: .65; }
+.timeline-cell:disabled { cursor: wait; }
 .timeline-end { align-self: start; color: #858d95; font: 8px var(--font-dm-mono), monospace; transform: translateX(-1px); }
 .timeline-legend { display: flex; flex-wrap: wrap; gap: 14px; padding-top: 12px; border-top: 1px solid #e7e7e3; color: #686863; font-size: 9px; }
 .timeline-legend span { display: flex; align-items: center; gap: 5px; }
@@ -242,6 +256,9 @@ footer { display: flex; justify-content: space-between; gap: 16px; padding: 13px
   .json-panel summary { font-size: 9px; }
 
   .simulation-panel { height: 100%; min-height: 0; display: flex; flex-direction: column; padding: 9px 12px 11px; overflow: hidden; }
+  .motion-cue { top: 57px; max-width: 76%; padding: 4px 8px 4px 5px; }
+  .motion-cue span { padding: 2px 5px; font-size: 6px; }
+  .motion-cue strong { font-size: 7px; }
   .control-strip { min-height: 43px; margin-bottom: 7px; padding: 5px 9px; }
   .playback-controls button { width: 30px; height: 30px; }
   .time-readout strong { font-size: 20px; }
