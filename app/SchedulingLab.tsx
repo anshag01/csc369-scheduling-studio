@@ -63,13 +63,14 @@ function useProcessMotion(
   const previousContext = useRef(contextKey);
   const previousStep = useRef(step);
   const previousEvents = useRef(events);
-  const finishTimer = useRef<number | null>(null);
+  const motionTimers = useRef<number[]>([]);
 
   useLayoutEffect(() => {
     const root = rootRef.current;
     if (!root) return;
 
-    if (finishTimer.current !== null) window.clearTimeout(finishTimer.current);
+    motionTimers.current.forEach((timer) => window.clearTimeout(timer));
+    motionTimers.current = [];
     document.querySelectorAll(".process-motion-arrow, .process-motion-ghost").forEach((element) => element.remove());
 
     const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -116,8 +117,39 @@ function useProcessMotion(
     }
 
     const movements: string[] = [];
-    const cues: string[] = [];
     type Action = "dispatch" | "demote" | "boost" | "preempt" | "rotate" | "yield" | "finish" | "arrive" | "reorder" | "return";
+    const eventAction = (event: string): Action | null => {
+      if (event.includes("finished and left")) return "finish";
+      if (event.includes("full allotment")) return "demote";
+      if (event.includes("quantum expired")) return "rotate";
+      if (event.includes("gave up the CPU")) return "yield";
+      if (event.startsWith("Priority boost")) return "boost";
+      if (event.includes(" arrived and joined")) return "arrive";
+      if (event.includes("preempted")) return "preempt";
+      if (event.includes("was selected")) return "dispatch";
+      return null;
+    };
+    const stageOrder: Action[] = [];
+    for (const event of transitionEvents) {
+      const action = eventAction(event);
+      if (action && !stageOrder.includes(action)) stageOrder.push(action);
+    }
+    if (direction === "backward") stageOrder.reverse();
+    const ensureStage = (action: Action) => {
+      if (!stageOrder.includes(action)) stageOrder.push(action);
+      return stageOrder.indexOf(action);
+    };
+    const stageDuration = Math.min(1900, Math.max(800, duration));
+    const stageGap = 130;
+    const stageSchedule = (action: Action) => ({
+      delay: ensureStage(action) * (stageDuration + stageGap),
+      duration: stageDuration,
+    });
+    const transitionDuration = () => stageOrder.length === 0
+      ? 0
+      : stageOrder.length * stageDuration + Math.max(0, stageOrder.length - 1) * stageGap;
+    const cueGroups = new Map<Action, { ids: Set<string>; destinations: Set<string>; reverse: boolean }>();
+    const arrowGroups = new Map<Action, { arrow: HTMLDivElement; marker: HTMLButtonElement; detail: HTMLSpanElement }>();
     const placeLabel = (place: string) => {
       if (place === "cpu") return "CPU";
       if (place === "ready") return "ready tail";
@@ -168,14 +200,14 @@ function useProcessMotion(
       to: { x: number; y: number },
       id: string,
       action: Action,
-      delay = 0,
-      arrowDuration = duration,
       reverse = false,
     ) => {
+      const schedule = stageSchedule(action);
+      if (arrowGroups.has(action)) return schedule;
       const deltaX = to.x - from.x;
       const deltaY = to.y - from.y;
       const distance = Math.hypot(deltaX, deltaY);
-      if (distance < 12) return;
+      if (distance < 12) return schedule;
       // Give simultaneous opposite-direction transfers their own visual lanes.
       // Since the perpendicular reverses with the arrow direction, CPU -> queue
       // and queue -> CPU no longer draw directly on top of one another.
@@ -188,40 +220,62 @@ function useProcessMotion(
       arrow.className = `process-motion-arrow action-${action}`;
       arrow.dataset.motionAction = action;
       arrow.dataset.motionProcessId = id;
-      arrow.setAttribute("aria-hidden", "true");
+      arrow.setAttribute("role", "presentation");
       arrow.style.left = `${start.x}px`;
       arrow.style.top = `${start.y}px`;
       arrow.style.width = `${distance}px`;
       arrow.style.transform = `rotate(${angle}rad)`;
       arrow.style.setProperty("--label-counter-rotate", `${-angle}rad`);
       const line = document.createElement("i");
-      const label = document.createElement("span");
-      label.textContent = `${reverse ? "UNDO " : ""}${actionLabel(action)} · ${id}`;
-      arrow.append(line, label);
+      const marker = document.createElement("button");
+      marker.type = "button";
+      marker.className = "process-motion-info";
+      const stageNumber = document.createElement("b");
+      stageNumber.textContent = String(ensureStage(action) + 1);
+      const detail = document.createElement("span");
+      detail.textContent = `${reverse ? "UNDO " : ""}${actionLabel(action)} · ${id}`;
+      marker.append(stageNumber, detail);
+      arrow.append(line, marker);
       document.body.appendChild(arrow);
-      const drawTime = Math.min(150, Math.max(70, arrowDuration * .22));
+      arrowGroups.set(action, { arrow, marker, detail });
+      const drawTime = Math.min(220, Math.max(120, schedule.duration * .2));
       line.animate(
         [{ transform: "scaleX(0)" }, { transform: "scaleX(1)" }],
-        { delay, duration: drawTime, fill: "both", easing: "ease-out" },
+        { delay: schedule.delay, duration: drawTime, fill: "both", easing: "ease-out" },
       );
       const animation = arrow.animate(
         [
-          { opacity: 0, offset: 0 },
-          { opacity: 1, offset: .14 },
-          { opacity: 1, offset: .78 },
-          { opacity: 0, offset: 1 },
+          { opacity: 0, visibility: "hidden", offset: 0 },
+          { opacity: 1, visibility: "visible", offset: .1 },
+          { opacity: 1, visibility: "visible", offset: .88 },
+          { opacity: 0, visibility: "hidden", offset: 1 },
         ],
-        { delay, duration: arrowDuration, fill: "both", easing: "linear" },
+        { delay: schedule.delay, duration: schedule.duration, fill: "both", easing: "linear" },
       );
+      marker.addEventListener("mouseenter", () => animation.pause());
+      marker.addEventListener("mouseleave", () => animation.play());
+      marker.addEventListener("focus", () => animation.pause());
+      marker.addEventListener("blur", () => animation.play());
       animation.finished.finally(() => arrow.remove());
+      return schedule;
     };
     const recordCue = (id: string, action: Action, destination: string, reverse = false) => {
-      cues.push(`${id} ${reverse ? "undoes " : ""}${actionLabel(action).toLowerCase()} → ${placeLabel(destination)}`);
+      ensureStage(action);
+      const group = cueGroups.get(action) ?? { ids: new Set<string>(), destinations: new Set<string>(), reverse };
+      group.ids.add(id);
+      group.destinations.add(placeLabel(destination));
+      cueGroups.set(action, group);
+    };
+    const cueText = (action: Action) => {
+      const group = cueGroups.get(action);
+      if (!group) return "";
+      const ids = [...group.ids];
+      const subject = ids.length <= 3 ? ids.join(", ") : `${ids.slice(0, 3).join(", ")} +${ids.length - 3}`;
+      const destinations = [...group.destinations].join(" / ");
+      return `${subject} ${group.reverse ? "undoes " : ""}${actionLabel(action).toLowerCase()} → ${destinations}`;
     };
     if (!reducedMotion) {
-      const finishTarget = root.querySelector<HTMLElement>("[data-motion-finish-target]");
-      const futureTarget = root.querySelector<HTMLElement>("[data-motion-future-target]");
-      const arrowLead = Math.min(145, Math.max(70, duration * .2));
+      const arrowLead = Math.min(210, Math.max(130, stageDuration * .16));
       for (const node of nodes) {
         const id = node.dataset.motionId;
         const next = id ? current.get(id) : null;
@@ -230,15 +284,15 @@ function useProcessMotion(
 
         if (!before) {
           const destination = center(next.rect);
-          if (direction === "backward" && finishTarget) {
-            const source = center(finishTarget.getBoundingClientRect());
-            showArrow(source, destination, id, "finish", 0, duration, true);
+          if (direction === "backward") {
+            const source = { x: Math.min(window.innerWidth - 36, destination.x + 180), y: destination.y };
+            const schedule = showArrow(source, destination, id, "finish", true);
             node.animate(
               [
                 { opacity: .25, transform: `translate(${source.x - destination.x}px, ${source.y - destination.y}px) scale(.3)` },
                 { opacity: 1, transform: "translate(0, 0) scale(1)" },
               ],
-              { delay: arrowLead, duration: duration - arrowLead, fill: "backwards", easing: "cubic-bezier(.2,.8,.2,1)" },
+              { delay: schedule.delay + arrowLead, duration: schedule.duration - arrowLead, fill: "backwards", easing: "cubic-bezier(.2,.8,.2,1)" },
             );
             movements.push(`finished->${next.place}`);
             recordCue(id, "finish", next.place, true);
@@ -246,29 +300,32 @@ function useProcessMotion(
             const waitingPlace = root.querySelector('[data-testid="ready-queue-0"]') ? (root.querySelector(".multi-queues") ? "q0" : "ready") : "ready";
             const queue = queuePoint(waitingPlace) ?? { x: destination.x, y: destination.y + 55 };
             const source = { x: queue.x, y: queue.y - 42 };
-            const half = duration / 2;
-            showArrow(source, queue, id, "arrive", 0, half);
-            showArrow(queue, destination, id, "dispatch", half, half);
+            const arrivalSchedule = showArrow(source, queue, id, "arrive");
+            const dispatchSchedule = showArrow(queue, destination, id, "dispatch");
+            const routeDuration = dispatchSchedule.delay + dispatchSchedule.duration;
+            const queueArrival = Math.min(.78, (arrivalSchedule.delay + arrivalSchedule.duration * .78) / routeDuration);
+            const queueDeparture = Math.max(queueArrival, dispatchSchedule.delay / routeDuration);
             node.animate(
               [
                 { opacity: 0, transform: `translate(${source.x - destination.x}px, ${source.y - destination.y}px) scale(.62)`, offset: 0 },
-                { opacity: 1, transform: `translate(${queue.x - destination.x}px, ${queue.y - destination.y}px) scale(.62)`, offset: .5 },
+                { opacity: 1, transform: `translate(${queue.x - destination.x}px, ${queue.y - destination.y}px) scale(.62)`, offset: queueArrival },
+                { opacity: 1, transform: `translate(${queue.x - destination.x}px, ${queue.y - destination.y}px) scale(.62)`, offset: queueDeparture },
                 { opacity: 1, transform: "translate(0, 0) scale(1)", offset: 1 },
               ],
-              { duration, fill: "backwards", easing: "cubic-bezier(.4,0,.2,1)" },
+              { duration: routeDuration, fill: "backwards", easing: "cubic-bezier(.4,0,.2,1)" },
             );
             movements.push(`arrival->${waitingPlace}->cpu`);
             recordCue(id, "arrive", waitingPlace);
             recordCue(id, "dispatch", "cpu");
           } else {
             const source = { x: destination.x, y: destination.y - 42 };
-            showArrow(source, destination, id, "arrive");
+            const schedule = showArrow(source, destination, id, "arrive");
             node.animate(
               [
                 { opacity: 0, transform: "translateY(-42px) scale(.78)" },
                 { opacity: 1, transform: "translateY(0) scale(1)" },
               ],
-              { delay: arrowLead, duration: duration - arrowLead, fill: "backwards", easing: "cubic-bezier(.2,.8,.2,1)" },
+              { delay: schedule.delay + arrowLead, duration: schedule.duration - arrowLead, fill: "backwards", easing: "cubic-bezier(.2,.8,.2,1)" },
             );
             movements.push(`arrival->${next.place}`);
             recordCue(id, "arrive", next.place);
@@ -287,7 +344,7 @@ function useProcessMotion(
         const forwardFrom = direction === "forward" ? before.place : next.place;
         const forwardTo = direction === "forward" ? next.place : before.place;
         const action = classify(id, forwardFrom, forwardTo);
-        showArrow(center(before.rect), center(next.rect), id, action, 0, duration, direction === "backward");
+        const schedule = showArrow(center(before.rect), center(next.rect), id, action, direction === "backward");
         recordCue(id, action, next.place, direction === "backward");
         node.animate(
           [
@@ -304,7 +361,7 @@ function useProcessMotion(
               zIndex: 1,
             },
           ],
-          { delay: arrowLead, duration: duration - arrowLead, fill: "backwards", easing: "cubic-bezier(.2,.75,.2,1)" },
+          { delay: schedule.delay + arrowLead, duration: schedule.duration - arrowLead, fill: "backwards", easing: "cubic-bezier(.2,.75,.2,1)" },
         );
         movements.push(`${before.place}->${next.place}`);
       }
@@ -340,70 +397,92 @@ function useProcessMotion(
         forwardActions.push("dispatch");
         const visualActions = direction === "forward" ? forwardActions : [...forwardActions].reverse();
         const routePoints = [center(next.rect), ...visualDestinations.map((destination) => queuePoint(destination) ?? center(next.rect)), center(next.rect)];
-        const segmentDuration = duration / Math.max(1, routePoints.length - 1);
         for (let index = 0; index < routePoints.length - 1; index += 1) {
           const destination = index < visualDestinations.length ? visualDestinations[index] : "cpu";
-          showArrow(routePoints[index], routePoints[index + 1], id, visualActions[index], index * segmentDuration, segmentDuration, direction === "backward");
+          showArrow(routePoints[index], routePoints[index + 1], id, visualActions[index], direction === "backward");
           recordCue(id, visualActions[index], destination, direction === "backward");
         }
 
+        const routeDuration = transitionDuration();
         const keyframes: Keyframe[] = [{ transform: "translate(0, 0) scale(1)", offset: 0 }];
         visualDestinations.forEach((destination, index) => {
           const target = queuePoint(destination) ?? center(next.rect);
           const destinationCenter = center(next.rect);
+          const schedule = stageSchedule(visualActions[index]);
           keyframes.push({
             transform: `translate(${target.x - destinationCenter.x}px, ${target.y - destinationCenter.y}px) scale(.62)`,
-            offset: (index + 1) / (visualDestinations.length + 1),
+            offset: Math.min(.9, (schedule.delay + schedule.duration * .78) / routeDuration),
           });
         });
         keyframes.push({ transform: "translate(0, 0) scale(1)", offset: 1 });
-        node.animate(keyframes, { duration, easing: "cubic-bezier(.4,0,.2,1)" });
+        node.animate(keyframes, { duration: routeDuration, easing: "cubic-bezier(.4,0,.2,1)" });
         movements.push(`cpu->${visualDestinations.join("->")}->cpu`);
       }
 
-      const disappearanceTarget = direction === "forward" ? finishTarget : futureTarget;
-      if (disappearanceTarget) {
-        const target = disappearanceTarget.getBoundingClientRect();
-        for (const [id, before] of previous.current) {
-          if (current.has(id)) continue;
-          const action: Action = direction === "forward" ? "finish" : "arrive";
-          const ghost = document.createElement("div");
-          ghost.className = "process-motion-ghost";
-          ghost.textContent = id;
-          ghost.style.setProperty("--process-color", before.color);
-          ghost.style.left = `${before.rect.left}px`;
-          ghost.style.top = `${before.rect.top}px`;
-          ghost.style.width = `${before.rect.width}px`;
-          ghost.style.height = `${before.rect.height}px`;
-          document.body.appendChild(ghost);
-          const deltaX = target.left + target.width / 2 - (before.rect.left + before.rect.width / 2);
-          const deltaY = target.top + target.height / 2 - (before.rect.top + before.rect.height / 2);
-          showArrow(center(before.rect), center(target), id, action, 0, duration, direction === "backward");
-          recordCue(id, action, direction === "forward" ? "finished" : "future", direction === "backward");
-          const animation = ghost.animate(
-            [
-              { opacity: 1, transform: "translate(0, 0) scale(1)" },
-              { opacity: .15, transform: `translate(${deltaX}px, ${deltaY}px) scale(.28)` },
-            ],
-            { delay: arrowLead, duration: duration - arrowLead, fill: "backwards", easing: "cubic-bezier(.4,0,.2,1)" },
-          );
-          animation.finished.finally(() => ghost.remove());
-          movements.push(`${before.place}->${direction === "forward" ? "finished" : "future"}`);
-        }
+      for (const [id, before] of previous.current) {
+        if (current.has(id)) continue;
+        const action: Action = direction === "forward" ? "finish" : "arrive";
+        const source = center(before.rect);
+        const destination = direction === "forward"
+          ? { x: Math.min(window.innerWidth - 36, source.x + 180), y: source.y }
+          : { x: source.x, y: Math.max(36, source.y - 58) };
+        const ghost = document.createElement("div");
+        ghost.className = "process-motion-ghost";
+        ghost.textContent = id;
+        ghost.style.setProperty("--process-color", before.color);
+        ghost.style.left = `${before.rect.left}px`;
+        ghost.style.top = `${before.rect.top}px`;
+        ghost.style.width = `${before.rect.width}px`;
+        ghost.style.height = `${before.rect.height}px`;
+        document.body.appendChild(ghost);
+        const deltaX = destination.x - source.x;
+        const deltaY = destination.y - source.y;
+        const schedule = showArrow(source, destination, id, action, direction === "backward");
+        recordCue(id, action, direction === "forward" ? "finished" : "future", direction === "backward");
+        const animation = ghost.animate(
+          [
+            { opacity: 1, transform: "translate(0, 0) scale(1)" },
+            { opacity: .08, transform: `translate(${deltaX}px, ${deltaY}px) scale(.28)` },
+          ],
+          { delay: schedule.delay + arrowLead, duration: schedule.duration - arrowLead, fill: "backwards", easing: "cubic-bezier(.4,0,.2,1)" },
+        );
+        animation.finished.finally(() => ghost.remove());
+        movements.push(`${before.place}->${direction === "forward" ? "finished" : "future"}`);
       }
     }
 
+    for (const [action, group] of arrowGroups) {
+      const cue = cueGroups.get(action);
+      if (!cue) continue;
+      const ids = [...cue.ids].join(", ");
+      const destinations = [...cue.destinations].join(" / ");
+      const detail = `${cue.reverse ? "UNDO " : ""}${actionLabel(action)} · ${ids} → ${destinations.toUpperCase()}`;
+      group.detail.textContent = detail;
+      group.marker.setAttribute("aria-label", detail);
+      group.arrow.dataset.motionDetail = detail;
+    }
+    const orderedCues = stageOrder.filter((action) => cueGroups.has(action));
+    const cueLabels = orderedCues.map((action) => cueText(action));
     root.dataset.lastMotionCount = String(movements.length);
     root.dataset.lastMotionTypes = movements.join(",");
-    root.dataset.lastMotionLabels = cues.join(" | ");
+    root.dataset.lastMotionLabels = cueLabels.join(" | ");
     root.dispatchEvent(new CustomEvent("scheduling-motion", { detail: movements }));
-    if (cues.length > 0 && !reducedMotion) {
-      setMotionCue(cues.join("  •  "));
+    if (orderedCues.length > 0 && !reducedMotion) {
+      setMotionCue(cueText(orderedCues[0]));
       setMotionBusy(true);
-      finishTimer.current = window.setTimeout(() => {
+      orderedCues.slice(1).forEach((action) => {
+        const timer = window.setTimeout(() => setMotionCue(cueText(action)), stageSchedule(action).delay);
+        motionTimers.current.push(timer);
+      });
+      const totalDuration = Math.max(...orderedCues.map((action) => {
+        const schedule = stageSchedule(action);
+        return schedule.delay + schedule.duration;
+      }));
+      const finishTimer = window.setTimeout(() => {
         setMotionBusy(false);
         setMotionCue(null);
-      }, duration + 40);
+      }, totalDuration + 80);
+      motionTimers.current.push(finishTimer);
     } else {
       setMotionCue(null);
       setMotionBusy(false);
@@ -414,7 +493,7 @@ function useProcessMotion(
     previousEvents.current = events;
 
     return () => {
-      if (finishTimer.current !== null) window.clearTimeout(finishTimer.current);
+      motionTimers.current.forEach((timer) => window.clearTimeout(timer));
     };
   }, [contextKey, duration, events, frameKey, rootRef, setMotionBusy, setMotionCue, step]);
 }
@@ -456,7 +535,7 @@ export default function SchedulingLab({
   const [mlfqBoostInterval, setMlfqBoostInterval] = useState(initialMlfqBoostInterval);
   const [step, setStep] = useState(Math.max(0, Math.floor(initialStep)));
   const [playing, setPlaying] = useState(false);
-  const [speed, setSpeed] = useState(1200);
+  const [speed, setSpeed] = useState(1400);
   const [showMetrics, setShowMetrics] = useState(initialShowMetrics);
   const [jsonText, setJsonText] = useState("");
   const [jsonMessage, setJsonMessage] = useState("");
@@ -474,14 +553,14 @@ export default function SchedulingLab({
   const processById = useMemo(() => new Map(processes.map((process) => [process.id, process])), [processes]);
 
   useEffect(() => {
-    if (!playing || step >= lastStep) return;
+    if (!playing || step >= lastStep || motionBusy) return;
     const timer = window.setTimeout(() => {
       const nextStep = Math.min(lastStep, step + 1);
       setStep(nextStep);
       if (nextStep >= lastStep) setPlaying(false);
     }, speed);
     return () => window.clearTimeout(timer);
-  }, [lastStep, playing, speed, step]);
+  }, [lastStep, motionBusy, playing, speed, step]);
   useEffect(() => {
     const handleKey = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement;
@@ -553,7 +632,7 @@ export default function SchedulingLab({
   const motionFrame = snapshot
     ? `${snapshot.time}:${snapshot.running ?? "idle"}:${snapshot.readyQueues.map((queue) => queue.join(".")).join("|")}`
     : "invalid";
-  const motionDuration = Math.min(1500, Math.max(560, speed - 100));
+  const motionDuration = Math.min(1900, Math.max(800, speed - 50));
   useProcessMotion(dashboardRef, motionFrame, motionContext, motionDuration, snapshot?.events ?? [], step, setMotionCue, setMotionBusy);
 
   return (
@@ -615,7 +694,7 @@ export default function SchedulingLab({
               <button onClick={() => { setPlaying(false); setStep((current) => Math.min(lastStep, current + 1)); }} disabled={!snapshot || step === lastStep || motionBusy} aria-label="Next time step">→</button>
             </div>
             <div className="time-readout"><span>TIME</span><strong data-testid="time-value">{snapshot?.time ?? "—"}</strong><span>/ {lastStep}</span></div>
-            <label className="speed-control">Speed<select value={speed} onChange={(event) => setSpeed(Number(event.target.value))}><option value="1800">Slow</option><option value="1200">Normal</option><option value="700">Fast</option></select></label>
+            <label className="speed-control">Speed<select value={speed} onChange={(event) => setSpeed(Number(event.target.value))}><option value="2000">Slow</option><option value="1400">Normal</option><option value="850">Fast</option></select></label>
             <button className={`metrics-toggle ${showMetrics ? "active" : ""}`} aria-pressed={showMetrics} onClick={() => setShowMetrics((current) => !current)}>{showMetrics ? "Hide metrics" : "Metrics"}</button>
             <div className="keyboard-hint"><kbd>←</kbd><kbd>→</kbd> step <kbd>space</kbd> play</div>
           </div>

@@ -135,7 +135,14 @@ test("process cards animate every scheduler transfer and reverse step without du
   await expect(page.locator('.process-motion-arrow[data-motion-action="rotate"][data-motion-process-id="A"]')).toContainText("QUANTUM EXPIRED · A");
   await expect(page.locator('.process-motion-arrow[data-motion-action="dispatch"][data-motion-process-id="B"]')).toContainText("DISPATCH · B");
   await expect(page.locator(".motion-cue")).toContainText("A quantum expired → ready tail");
-  await expect(page.locator(".motion-cue")).toContainText("B dispatch → CPU");
+  await expect(page.locator('.process-motion-arrow[data-motion-action="rotate"]')).toHaveCSS("opacity", "1");
+  await expect(page.locator('.process-motion-arrow[data-motion-action="dispatch"]')).toHaveCSS("opacity", "0");
+  await expect(page.locator(".motion-cue")).toContainText("B dispatch → CPU", { timeout: 4_000 });
+  await expect(page.locator('.process-motion-arrow[data-motion-action="dispatch"]')).toHaveCSS("opacity", "1");
+  const dispatchMarker = page.locator('.process-motion-arrow[data-motion-action="dispatch"] .process-motion-info');
+  await dispatchMarker.hover();
+  await expect(dispatchMarker.locator("span")).toHaveCSS("visibility", "visible");
+  await expect(dispatchMarker).toHaveAttribute("aria-label", "DISPATCH · B → CPU");
   await expect(page.getByRole("button", { name: "Next time step" })).toBeDisabled();
   const arrowGeometry = await page.locator(".process-motion-arrow").evaluateAll((arrows) => arrows.map((arrow) => ({
     width: arrow.getBoundingClientRect().width,
@@ -161,7 +168,7 @@ test("completion and MLFQ boosts have complete, destination-based animations", a
   await expect(page.locator(".dashboard-grid")).toHaveAttribute("data-last-motion-types", "cpu->finished");
   await expect(page.locator('.process-motion-arrow[data-motion-action="finish"]')).toContainText("FINISH · A");
   await expect(page.locator(".motion-cue")).toContainText("A finish → finished");
-  await expect(page.locator(".process-motion-arrow")).toHaveCount(0, { timeout: 2_000 });
+  await expect(page.locator(".process-motion-arrow")).toHaveCount(0, { timeout: 3_000 });
   await expect(page.locator(".process-motion-ghost")).toHaveCount(0);
 
   await json.fill(JSON.stringify({
