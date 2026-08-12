@@ -137,6 +137,15 @@ test("process cards animate every scheduler transfer and reverse step without du
   await expect(page.locator(".motion-cue")).toContainText("A quantum expired → ready tail");
   await expect(page.locator('.process-motion-arrow[data-motion-action="rotate"]')).toHaveCSS("opacity", "1");
   await expect(page.locator('.process-motion-arrow[data-motion-action="dispatch"]')).toHaveCSS("opacity", "0");
+  expect(await page.locator('.process-motion-arrow[data-motion-action="rotate"]').evaluate((arrow) =>
+    arrow.getAnimations({ subtree: true }).length,
+  )).toBe(0);
+  expect(await page.locator('.process-motion-traveler[data-process-id="A"]').evaluate((card) => card.getAnimations().length)).toBeGreaterThan(0);
+  await page.waitForTimeout(750);
+  const rotationPositions = await page.locator(".process-motion-traveler").evaluateAll((cards) =>
+    Object.fromEntries(cards.map((card) => [card.getAttribute("data-process-id"), card.getBoundingClientRect().x])),
+  );
+  expect(rotationPositions.A).toBeGreaterThan(rotationPositions.B);
   await expect(page.locator(".motion-cue")).toContainText("B dispatch → CPU", { timeout: 4_000 });
   await expect(page.locator('.process-motion-arrow[data-motion-action="dispatch"]')).toHaveCSS("opacity", "1");
   const dispatchMarker = page.locator('.process-motion-arrow[data-motion-action="dispatch"] .process-motion-info');
@@ -157,6 +166,43 @@ test("process cards animate every scheduler transfer and reverse step without du
   await expect(page.locator('[data-motion-id="B"]')).toHaveCount(1);
   await expect(page.locator('.process-motion-arrow[data-motion-action="rotate"]')).toContainText("UNDO QUANTUM EXPIRED");
   await expect(page.locator('.process-motion-arrow[data-motion-action="dispatch"]')).toContainText("UNDO DISPATCH");
+});
+
+test("busy MLFQ boundaries move process cards through exact intermediate states behind static guides", async ({ page }) => {
+  await page.locator("#algorithm").selectOption("mlfq");
+  await page.getByRole("spinbutton", { name: "Boost ticks" }).fill("10");
+  await page.locator('[data-timeline-time="9"]').click();
+  await page.getByRole("button", { name: "Next time step" }).click();
+
+  await expect(page.locator(".motion-cue")).toContainText("E finish → finished");
+  expect(await page.locator('.process-motion-arrow[data-motion-action="finish"]').evaluate((arrow) =>
+    arrow.getAnimations({ subtree: true }).length,
+  )).toBe(0);
+
+  await expect(page.locator(".motion-cue")).toContainText("priority boost → Q0", { timeout: 5_000 });
+  const boostArrow = page.locator('.process-motion-arrow[data-motion-action="boost"]');
+  await expect(boostArrow).toHaveCount(1);
+  await expect(boostArrow).toHaveAttribute("data-motion-detail", "PRIORITY BOOST · A, B, C, D → Q0");
+  await page.waitForTimeout(750);
+  const boosted = await page.locator(".process-motion-traveler").evaluateAll((cards) => cards
+    .filter((card) => ["A", "B", "C", "D"].includes(card.getAttribute("data-process-id") ?? ""))
+    .map((card) => ({ id: card.getAttribute("data-process-id"), rect: card.getBoundingClientRect().toJSON() }))
+    .sort((left, right) => left.rect.x - right.rect.x));
+  expect(boosted.map(({ id }) => id)).toEqual(["A", "B", "C", "D"]);
+  expect(new Set(boosted.map(({ rect }) => Math.round(rect.y))).size).toBe(1);
+  const boostedBLeft = boosted[1].rect.x;
+
+  await expect(page.locator(".motion-cue")).toContainText("A dispatch → CPU", { timeout: 5_000 });
+  await page.waitForTimeout(750);
+  const dispatched = await page.locator(".process-motion-traveler").evaluateAll((cards) => Object.fromEntries(cards.map((card) => {
+    const rect = card.getBoundingClientRect();
+    return [card.getAttribute("data-process-id"), { x: rect.x, y: rect.y }];
+  })));
+  expect(dispatched.A.y).toBeLessThan(dispatched.B.y);
+  expect(dispatched.B.x).toBeLessThan(boostedBLeft);
+  expect(await page.locator('.process-motion-arrow[data-motion-action="dispatch"]').evaluate((arrow) =>
+    arrow.getAnimations({ subtree: true }).length,
+  )).toBe(0);
 });
 
 test("completion and MLFQ boosts have complete, destination-based animations", async ({ page }) => {

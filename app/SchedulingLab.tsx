@@ -47,6 +47,7 @@ type MotionPoint = {
   rect: DOMRect;
   place: string;
   color: string;
+  template: HTMLElement;
 };
 
 function useProcessMotion(
@@ -71,7 +72,12 @@ function useProcessMotion(
 
     motionTimers.current.forEach((timer) => window.clearTimeout(timer));
     motionTimers.current = [];
-    document.querySelectorAll(".process-motion-arrow, .process-motion-ghost").forEach((element) => element.remove());
+    document.querySelectorAll<HTMLElement>("[data-motion-hidden]").forEach((element) => {
+      element.style.visibility = "";
+      element.removeAttribute("data-motion-hidden");
+    });
+    document.querySelectorAll(".process-motion-arrow, .process-motion-ghost, .process-motion-traveler").forEach((element) => element.remove());
+    document.querySelectorAll(".process-is-moving").forEach((element) => element.classList.remove("process-is-moving"));
 
     const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     const direction = step >= previousStep.current ? "forward" : "backward";
@@ -85,6 +91,7 @@ function useProcessMotion(
         rect: node.getBoundingClientRect(),
         place: node.dataset.motionPlace ?? "unknown",
         color: node.dataset.motionColor ?? "#4f6bed",
+        template: node.cloneNode(true) as HTMLElement,
       });
     }
 
@@ -214,7 +221,11 @@ function useProcessMotion(
       const laneOffset = Math.min(14, Math.max(9, distance * .035));
       const normalX = -deltaY / distance * laneOffset;
       const normalY = deltaX / distance * laneOffset;
-      const start = { x: from.x + normalX, y: from.y + normalY };
+      const guideLength = Math.min(distance, 180);
+      const start = {
+        x: to.x - deltaX / distance * guideLength + normalX,
+        y: to.y - deltaY / distance * guideLength + normalY,
+      };
       const angle = Math.atan2(deltaY, deltaX);
       const arrow = document.createElement("div");
       arrow.className = `process-motion-arrow action-${action}`;
@@ -223,7 +234,7 @@ function useProcessMotion(
       arrow.setAttribute("role", "presentation");
       arrow.style.left = `${start.x}px`;
       arrow.style.top = `${start.y}px`;
-      arrow.style.width = `${distance}px`;
+      arrow.style.width = `${guideLength}px`;
       arrow.style.transform = `rotate(${angle}rad)`;
       arrow.style.setProperty("--label-counter-rotate", `${-angle}rad`);
       const line = document.createElement("i");
@@ -238,25 +249,17 @@ function useProcessMotion(
       arrow.append(line, marker);
       document.body.appendChild(arrow);
       arrowGroups.set(action, { arrow, marker, detail });
-      const drawTime = Math.min(220, Math.max(120, schedule.duration * .2));
-      line.animate(
-        [{ transform: "scaleX(0)" }, { transform: "scaleX(1)" }],
-        { delay: schedule.delay, duration: drawTime, fill: "both", easing: "ease-out" },
-      );
-      const animation = arrow.animate(
-        [
-          { opacity: 0, visibility: "hidden", offset: 0 },
-          { opacity: 1, visibility: "visible", offset: .1 },
-          { opacity: 1, visibility: "visible", offset: .88 },
-          { opacity: 0, visibility: "hidden", offset: 1 },
-        ],
-        { delay: schedule.delay, duration: schedule.duration, fill: "both", easing: "linear" },
-      );
-      marker.addEventListener("mouseenter", () => animation.pause());
-      marker.addEventListener("mouseleave", () => animation.play());
-      marker.addEventListener("focus", () => animation.pause());
-      marker.addEventListener("blur", () => animation.play());
-      animation.finished.finally(() => arrow.remove());
+      // The arrow is a stationary route guide. Only the process card moves.
+      // Reveal it shortly before that stage's card motion and remove it when
+      // the stage ends; do not animate the line or arrowhead themselves.
+      arrow.style.opacity = "0";
+      arrow.style.visibility = "hidden";
+      const revealTimer = window.setTimeout(() => {
+        arrow.style.opacity = "1";
+        arrow.style.visibility = "visible";
+      }, schedule.delay);
+      const removeTimer = window.setTimeout(() => arrow.remove(), schedule.delay + schedule.duration);
+      motionTimers.current.push(revealTimer, removeTimer);
       return schedule;
     };
     const recordCue = (id: string, action: Action, destination: string, reverse = false) => {
@@ -276,6 +279,113 @@ function useProcessMotion(
     };
     if (!reducedMotion) {
       const arrowLead = Math.min(210, Math.max(130, stageDuration * .16));
+      const rectAround = (point: { x: number; y: number }, width: number, height: number) =>
+        new DOMRect(point.x - width / 2, point.y - height / 2, width, height);
+      const createTraveler = (template: HTMLElement, source: DOMRect, target?: HTMLElement) => {
+        const traveler = template.cloneNode(true) as HTMLElement;
+        traveler.querySelectorAll("[data-motion-id], [data-testid]").forEach((element) => {
+          element.removeAttribute("data-motion-id");
+          element.removeAttribute("data-testid");
+        });
+        traveler.removeAttribute("data-motion-id");
+        traveler.removeAttribute("data-testid");
+        traveler.classList.add("process-motion-traveler", "process-is-moving");
+        traveler.setAttribute("aria-hidden", "true");
+        traveler.style.left = `${source.left}px`;
+        traveler.style.top = `${source.top}px`;
+        traveler.style.width = `${source.width}px`;
+        traveler.style.height = `${source.height}px`;
+        document.body.appendChild(traveler);
+        if (target) {
+          target.style.visibility = "hidden";
+          target.dataset.motionHidden = "true";
+        }
+        return traveler;
+      };
+      const finishTraveler = (traveler: HTMLElement, target?: HTMLElement) => {
+        traveler.remove();
+        if (target) {
+          target.style.visibility = "";
+          target.removeAttribute("data-motion-hidden");
+        }
+      };
+      const travelCard = (
+        template: HTMLElement,
+        source: DOMRect,
+        destination: DOMRect,
+        target: HTMLElement | undefined,
+        schedule: { delay: number; duration: number },
+      ) => {
+        const traveler = createTraveler(template, source, target);
+        const deltaX = destination.left - source.left;
+        const deltaY = destination.top - source.top;
+        const scaleX = destination.width / Math.max(1, source.width);
+        const scaleY = destination.height / Math.max(1, source.height);
+        const animation = traveler.animate(
+          [
+            { transform: "translate(0, 0) scale(1, 1)" },
+            { transform: `translate(${deltaX}px, ${deltaY}px) scale(${scaleX}, ${scaleY})` },
+          ],
+          {
+            delay: schedule.delay + arrowLead,
+            duration: schedule.duration - arrowLead,
+            fill: "both",
+            easing: "cubic-bezier(.2,.75,.2,1)",
+          },
+        );
+        animation.finished.finally(() => finishTraveler(traveler, target));
+        return traveler;
+      };
+      const queueSlotRect = (place: string, index: number, width: number, height: number) => {
+        const queueIndex = place === "ready" ? 0 : Number(place.slice(1));
+        const track = root.querySelector<HTMLElement>(`[data-testid="ready-queue-${queueIndex}"]`);
+        if (!track) return rectAround(queuePoint(place) ?? { x: 0, y: 0 }, width, height);
+        const trackRect = track.getBoundingClientRect();
+        const head = track.querySelector<HTMLElement>(".queue-head")?.getBoundingClientRect();
+        const left = trackRect.left + 11 + (head?.width ?? 8) + 8 + index * (width + 8);
+        return new DOMRect(left, trackRect.top + (trackRect.height - height) / 2, width, height);
+      };
+      const travelStages = (
+        template: HTMLElement,
+        source: DOMRect,
+        target: HTMLElement,
+        stages: Array<{ action: Action; destination: DOMRect }>,
+      ) => {
+        const traveler = createTraveler(template, source, target);
+        const total = Math.max(...stages.map(({ action }) => {
+          const schedule = stageSchedule(action);
+          return schedule.delay + schedule.duration;
+        }));
+        const keyframes: Keyframe[] = [{ transform: "translate(0, 0) scale(1, 1)", offset: 0 }];
+        let previousTransform = "translate(0, 0) scale(1, 1)";
+        for (const { action, destination } of stages) {
+          const schedule = stageSchedule(action);
+          const startOffset = Math.min(.98, (schedule.delay + arrowLead) / total);
+          const endOffset = Math.min(1, (schedule.delay + schedule.duration * .8) / total);
+          keyframes.push({ transform: previousTransform, offset: startOffset });
+          previousTransform = `translate(${destination.left - source.left}px, ${destination.top - source.top}px) scale(${destination.width / Math.max(1, source.width)}, ${destination.height / Math.max(1, source.height)})`;
+          keyframes.push({ transform: previousTransform, offset: endOffset });
+        }
+        if ((keyframes.at(-1)?.offset ?? 0) < 1) keyframes.push({ transform: previousTransform, offset: 1 });
+        const animation = traveler.animate(keyframes, { duration: total, fill: "both", easing: "linear" });
+        animation.finished.finally(() => finishTraveler(traveler, target));
+      };
+      const previousQueueEntries = (place: string) => [...previous.current.entries()]
+        .filter(([, point]) => point.place === place)
+        .sort(([, left], [, right]) => left.rect.left - right.rect.left);
+      const boostHappened = transitionEvents.some((event) => event.startsWith("Priority boost moved"));
+      const boostedWaiting = [...previous.current.entries()]
+        .filter(([, point]) => /^q\d+$/.test(point.place))
+        .sort(([, left], [, right]) => {
+          const levelDifference = Number(left.place.slice(1)) - Number(right.place.slice(1));
+          return levelDifference || left.rect.left - right.rect.left;
+        });
+      const reverseBoostedWaiting = [...current.entries()]
+        .filter(([, point]) => /^q\d+$/.test(point.place))
+        .sort(([, left], [, right]) => {
+          const levelDifference = Number(left.place.slice(1)) - Number(right.place.slice(1));
+          return levelDifference || left.rect.left - right.rect.left;
+        });
       for (const node of nodes) {
         const id = node.dataset.motionId;
         const next = id ? current.get(id) : null;
@@ -287,13 +397,7 @@ function useProcessMotion(
           if (direction === "backward") {
             const source = { x: Math.min(window.innerWidth - 36, destination.x + 180), y: destination.y };
             const schedule = showArrow(source, destination, id, "finish", true);
-            node.animate(
-              [
-                { opacity: .25, transform: `translate(${source.x - destination.x}px, ${source.y - destination.y}px) scale(.3)` },
-                { opacity: 1, transform: "translate(0, 0) scale(1)" },
-              ],
-              { delay: schedule.delay + arrowLead, duration: schedule.duration - arrowLead, fill: "backwards", easing: "cubic-bezier(.2,.8,.2,1)" },
-            );
+            travelCard(next.template, rectAround(source, next.rect.width, next.rect.height), next.rect, node, schedule);
             movements.push(`finished->${next.place}`);
             recordCue(id, "finish", next.place, true);
           } else if (next.place === "cpu") {
@@ -305,32 +409,75 @@ function useProcessMotion(
             const routeDuration = dispatchSchedule.delay + dispatchSchedule.duration;
             const queueArrival = Math.min(.78, (arrivalSchedule.delay + arrivalSchedule.duration * .78) / routeDuration);
             const queueDeparture = Math.max(queueArrival, dispatchSchedule.delay / routeDuration);
-            node.animate(
+            const sourceRect = rectAround(source, next.rect.width * .62, next.rect.height * .62);
+            const traveler = createTraveler(next.template, sourceRect, node);
+            const animation = traveler.animate(
               [
-                { opacity: 0, transform: `translate(${source.x - destination.x}px, ${source.y - destination.y}px) scale(.62)`, offset: 0 },
-                { opacity: 1, transform: `translate(${queue.x - destination.x}px, ${queue.y - destination.y}px) scale(.62)`, offset: queueArrival },
-                { opacity: 1, transform: `translate(${queue.x - destination.x}px, ${queue.y - destination.y}px) scale(.62)`, offset: queueDeparture },
-                { opacity: 1, transform: "translate(0, 0) scale(1)", offset: 1 },
+                { opacity: 0, transform: "translate(0, 0) scale(1)", offset: 0 },
+                { opacity: 1, transform: `translate(${queue.x - source.x}px, ${queue.y - source.y}px) scale(1)`, offset: queueArrival },
+                { opacity: 1, transform: `translate(${queue.x - source.x}px, ${queue.y - source.y}px) scale(1)`, offset: queueDeparture },
+                { opacity: 1, transform: `translate(${next.rect.left - sourceRect.left}px, ${next.rect.top - sourceRect.top}px) scale(${next.rect.width / sourceRect.width}, ${next.rect.height / sourceRect.height})`, offset: 1 },
               ],
-              { duration: routeDuration, fill: "backwards", easing: "cubic-bezier(.4,0,.2,1)" },
+              { duration: routeDuration, fill: "both", easing: "linear" },
             );
+            animation.finished.finally(() => finishTraveler(traveler, node));
             movements.push(`arrival->${waitingPlace}->cpu`);
             recordCue(id, "arrive", waitingPlace);
             recordCue(id, "dispatch", "cpu");
           } else {
             const source = { x: destination.x, y: destination.y - 42 };
             const schedule = showArrow(source, destination, id, "arrive");
-            node.animate(
-              [
-                { opacity: 0, transform: "translateY(-42px) scale(.78)" },
-                { opacity: 1, transform: "translateY(0) scale(1)" },
-              ],
-              { delay: schedule.delay + arrowLead, duration: schedule.duration - arrowLead, fill: "backwards", easing: "cubic-bezier(.2,.8,.2,1)" },
-            );
+            travelCard(next.template, rectAround(source, next.rect.width * .78, next.rect.height * .78), next.rect, node, schedule);
             movements.push(`arrival->${next.place}`);
             recordCue(id, "arrive", next.place);
           }
           continue;
+        }
+
+        if (direction === "forward" && boostHappened && /^q\d+$/.test(before.place)) {
+          const boostIndex = boostedWaiting.findIndex(([processId]) => processId === id);
+          const intermediate = queueSlotRect("q0", Math.max(0, boostIndex), before.rect.width, before.rect.height);
+          const boostSchedule = showArrow(center(before.rect), center(intermediate), id, "boost");
+          recordCue(id, "boost", "q0");
+          const stages: Array<{ action: Action; destination: DOMRect }> = [{ action: "boost", destination: intermediate }];
+          if (next.place === "cpu") {
+            showArrow(center(intermediate), center(next.rect), id, "dispatch");
+            recordCue(id, "dispatch", "cpu");
+            stages.push({ action: "dispatch", destination: next.rect });
+            movements.push(`${before.place}->q0->cpu`);
+          } else {
+            const dispatchFollows = stageOrder.indexOf("dispatch") > stageOrder.indexOf("boost");
+            const needsCompaction = Math.abs(intermediate.left - next.rect.left) > 1 || Math.abs(intermediate.top - next.rect.top) > 1;
+            if (dispatchFollows && needsCompaction) stages.push({ action: "dispatch", destination: next.rect });
+            movements.push(`${before.place}->q0`);
+          }
+          travelStages(before.template, before.rect, node, stages);
+          void boostSchedule;
+          continue;
+        }
+
+        if (
+          direction === "backward" && boostHappened && /^q\d+$/.test(next.place) &&
+          (before.place === "q0" || before.place === "cpu")
+        ) {
+          const boostIndex = reverseBoostedWaiting.findIndex(([processId]) => processId === id);
+          if (boostIndex >= 0) {
+            const intermediate = queueSlotRect("q0", boostIndex, next.rect.width, next.rect.height);
+            const stages: Array<{ action: Action; destination: DOMRect }> = [];
+            if (stageOrder.includes("dispatch")) {
+              if (before.place === "cpu") {
+                showArrow(center(before.rect), center(intermediate), id, "dispatch", true);
+                recordCue(id, "dispatch", "q0", true);
+              }
+              stages.push({ action: "dispatch", destination: intermediate });
+            }
+            showArrow(center(intermediate), center(next.rect), id, "boost", true);
+            recordCue(id, "boost", next.place, true);
+            stages.push({ action: "boost", destination: next.rect });
+            travelStages(before.template, before.rect, node, stages);
+            movements.push(`${before.place}->q0->${next.place}`);
+            continue;
+          }
         }
 
         const deltaX = before.rect.left - next.rect.left;
@@ -344,25 +491,36 @@ function useProcessMotion(
         const forwardFrom = direction === "forward" ? before.place : next.place;
         const forwardTo = direction === "forward" ? next.place : before.place;
         const action = classify(id, forwardFrom, forwardTo);
+        if (direction === "backward" && action === "rotate" && before.place === "ready" && next.place === "cpu") {
+          const intermediate = queueSlotRect("ready", previousQueueEntries("ready").length, before.rect.width, before.rect.height);
+          showArrow(center(intermediate), center(next.rect), id, action, true);
+          recordCue(id, action, "cpu", true);
+          const stages: Array<{ action: Action; destination: DOMRect }> = [];
+          if (stageOrder.includes("dispatch")) stages.push({ action: "dispatch", destination: intermediate });
+          stages.push({ action, destination: next.rect });
+          travelStages(before.template, before.rect, node, stages);
+          movements.push(`${before.place}->${next.place}`);
+          continue;
+        }
+        if (direction === "forward" && action === "rotate" && next.place === "ready") {
+          const arrivalsBeforeExpiry = nodes.filter((candidate) => {
+            const candidateId = candidate.dataset.motionId;
+            return candidateId && !previous.current.has(candidateId) && candidateId !== id;
+          }).length;
+          const intermediateIndex = previousQueueEntries("ready").length + arrivalsBeforeExpiry;
+          const intermediate = queueSlotRect("ready", intermediateIndex, next.rect.width, next.rect.height);
+          const schedule = showArrow(center(before.rect), center(intermediate), id, action, false);
+          recordCue(id, action, "ready", false);
+          const stages: Array<{ action: Action; destination: DOMRect }> = [{ action, destination: intermediate }];
+          if (stageOrder.indexOf("dispatch") > stageOrder.indexOf(action)) stages.push({ action: "dispatch", destination: next.rect });
+          travelStages(before.template, before.rect, node, stages);
+          movements.push(`${before.place}->${next.place}`);
+          void schedule;
+          continue;
+        }
         const schedule = showArrow(center(before.rect), center(next.rect), id, action, direction === "backward");
         recordCue(id, action, next.place, direction === "backward");
-        node.animate(
-          [
-            {
-              transform: `translate(${deltaX}px, ${deltaY}px) scale(${scaleX}, ${scaleY})`,
-              transformOrigin: "top left",
-              boxShadow: "0 12px 28px rgba(32,33,35,.2)",
-              zIndex: 30,
-            },
-            {
-              transform: "translate(0, 0) scale(1, 1)",
-              transformOrigin: "top left",
-              boxShadow: "0 3px 8px rgba(0,0,0,.045)",
-              zIndex: 1,
-            },
-          ],
-          { delay: schedule.delay + arrowLead, duration: schedule.duration - arrowLead, fill: "backwards", easing: "cubic-bezier(.2,.75,.2,1)" },
-        );
+        travelCard(before.template, before.rect, next.rect, node, schedule);
         movements.push(`${before.place}->${next.place}`);
       }
 
@@ -396,7 +554,7 @@ function useProcessMotion(
         if (destinations.length > 1) forwardActions.push("boost");
         forwardActions.push("dispatch");
         const visualActions = direction === "forward" ? forwardActions : [...forwardActions].reverse();
-        const routePoints = [center(next.rect), ...visualDestinations.map((destination) => queuePoint(destination) ?? center(next.rect)), center(next.rect)];
+        const routePoints = [center(before.rect), ...visualDestinations.map((destination) => queuePoint(destination) ?? center(next.rect)), center(next.rect)];
         for (let index = 0; index < routePoints.length - 1; index += 1) {
           const destination = index < visualDestinations.length ? visualDestinations[index] : "cpu";
           showArrow(routePoints[index], routePoints[index + 1], id, visualActions[index], direction === "backward");
@@ -404,18 +562,26 @@ function useProcessMotion(
         }
 
         const routeDuration = transitionDuration();
-        const keyframes: Keyframe[] = [{ transform: "translate(0, 0) scale(1)", offset: 0 }];
+        const traveler = createTraveler(before.template, before.rect, node);
+        const sourceCenter = center(before.rect);
+        const keyframes: Keyframe[] = [
+          { transform: "translate(0, 0) scale(1)", offset: 0 },
+          { transform: "translate(0, 0) scale(1)", offset: Math.min(.3, arrowLead / routeDuration) },
+        ];
         visualDestinations.forEach((destination, index) => {
           const target = queuePoint(destination) ?? center(next.rect);
-          const destinationCenter = center(next.rect);
           const schedule = stageSchedule(visualActions[index]);
           keyframes.push({
-            transform: `translate(${target.x - destinationCenter.x}px, ${target.y - destinationCenter.y}px) scale(.62)`,
+            transform: `translate(${target.x - sourceCenter.x}px, ${target.y - sourceCenter.y}px) scale(.62)`,
             offset: Math.min(.9, (schedule.delay + schedule.duration * .78) / routeDuration),
           });
         });
-        keyframes.push({ transform: "translate(0, 0) scale(1)", offset: 1 });
-        node.animate(keyframes, { duration: routeDuration, easing: "cubic-bezier(.4,0,.2,1)" });
+        keyframes.push({
+          transform: `translate(${next.rect.left - before.rect.left}px, ${next.rect.top - before.rect.top}px) scale(${next.rect.width / Math.max(1, before.rect.width)}, ${next.rect.height / Math.max(1, before.rect.height)})`,
+          offset: 1,
+        });
+        const animation = traveler.animate(keyframes, { duration: routeDuration, fill: "both", easing: "linear" });
+        animation.finished.finally(() => finishTraveler(traveler, node));
         movements.push(`cpu->${visualDestinations.join("->")}->cpu`);
       }
 
@@ -426,27 +592,19 @@ function useProcessMotion(
         const destination = direction === "forward"
           ? { x: Math.min(window.innerWidth - 36, source.x + 180), y: source.y }
           : { x: source.x, y: Math.max(36, source.y - 58) };
-        const ghost = document.createElement("div");
-        ghost.className = "process-motion-ghost";
-        ghost.textContent = id;
-        ghost.style.setProperty("--process-color", before.color);
-        ghost.style.left = `${before.rect.left}px`;
-        ghost.style.top = `${before.rect.top}px`;
-        ghost.style.width = `${before.rect.width}px`;
-        ghost.style.height = `${before.rect.height}px`;
-        document.body.appendChild(ghost);
         const deltaX = destination.x - source.x;
         const deltaY = destination.y - source.y;
         const schedule = showArrow(source, destination, id, action, direction === "backward");
+        const traveler = createTraveler(before.template, before.rect);
         recordCue(id, action, direction === "forward" ? "finished" : "future", direction === "backward");
-        const animation = ghost.animate(
+        const animation = traveler.animate(
           [
             { opacity: 1, transform: "translate(0, 0) scale(1)" },
             { opacity: .08, transform: `translate(${deltaX}px, ${deltaY}px) scale(.28)` },
           ],
           { delay: schedule.delay + arrowLead, duration: schedule.duration - arrowLead, fill: "backwards", easing: "cubic-bezier(.4,0,.2,1)" },
         );
-        animation.finished.finally(() => ghost.remove());
+        animation.finished.finally(() => finishTraveler(traveler));
         movements.push(`${before.place}->${direction === "forward" ? "finished" : "future"}`);
       }
     }
