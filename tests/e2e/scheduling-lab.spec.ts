@@ -137,6 +137,19 @@ test("CPU and ready process cards keep identical geometry", async ({ page }) => 
     })),
   );
   expect(geometry.cpu).toEqual(geometry.ready);
+
+  await expect(page.locator('.cpu-card > [data-testid="completion-dock"]')).toHaveCount(1);
+  await expect(page.locator('.event-card [data-testid="completion-dock"]')).toHaveCount(0);
+  const completionPlacement = await page.locator(".cpu-card").evaluate((cpu) => {
+    const cpuRect = cpu.getBoundingClientRect();
+    const copyRect = cpu.querySelector<HTMLElement>(".cpu-process-copy")!.getBoundingClientRect();
+    const dockRect = cpu.querySelector<HTMLElement>(".completion-dock")!.getBoundingClientRect();
+    return {
+      toRightOfCopy: dockRect.left >= copyRect.right,
+      insideCpu: dockRect.left >= cpuRect.left && dockRect.right <= cpuRect.right && dockRect.top >= cpuRect.top && dockRect.bottom <= cpuRect.bottom,
+    };
+  });
+  expect(completionPlacement).toEqual({ toRightOfCopy: true, insideCpu: true });
 });
 
 test("process cards animate every scheduler transfer and reverse step without duplicates", async ({ page }) => {
