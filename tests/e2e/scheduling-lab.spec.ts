@@ -107,9 +107,14 @@ test("the running process appears only on the CPU for every policy", async ({ pa
       await expect(page.locator(".cpu-process-copy")).toContainText("1/2 quantum used");
     } else if (algorithm === "mlfq") {
       await expect(cpuProcessCard).toHaveAttribute("data-allotment-used", "1");
-      await expect(cpuProcessCard).toContainText("1/2 used");
+      await expect(cpuProcessCard).toContainText("Q0 · 1/2");
       await expect(page.locator(".cpu-process-copy")).toContainText("1/2 allotment used");
     }
+
+    const clippedTokenText = await cpuProcessCard.locator("strong, span, small").evaluateAll((items) =>
+      items.some((item) => item.scrollWidth > item.clientWidth + 1),
+    );
+    expect(clippedTokenText).toBe(false);
   }
 });
 
@@ -263,6 +268,18 @@ test("completion and MLFQ boosts have complete, destination-based animations", a
   await expect(page.locator(".dashboard-grid")).toHaveAttribute("data-last-motion-types", "cpu->finished");
   await expect(page.locator('.process-motion-arrow[data-motion-action="finish"]')).toContainText("FINISH · A");
   await expect(page.locator(".motion-cue")).toContainText("A finish → finished");
+  await expect(page.getByTestId("completion-dock")).toHaveAttribute("data-completed-count", "1");
+  await expect(page.getByTestId("completion-dock")).toContainText("COMPLETED");
+  const completionMotion = page.locator('.process-motion-traveler.process-completing[data-motion-destination="completed"]');
+  await expect(completionMotion).toHaveCount(1);
+  const completionKeyframes = await completionMotion.evaluate((card) =>
+    card.getAnimations().flatMap((animation) => (animation.effect as KeyframeEffect).getKeyframes()).map((frame) => ({
+      opacity: Number(frame.opacity),
+      transform: String(frame.transform ?? ""),
+    })),
+  );
+  expect(completionKeyframes.at(-1)?.opacity).toBeLessThan(.1);
+  expect(completionKeyframes.every(({ transform }) => !transform.includes("scale"))).toBe(true);
   await expect(page.locator(".process-motion-arrow")).toHaveCount(0, { timeout: 3_000 });
   await expect(page.locator(".process-motion-ghost")).toHaveCount(0);
 

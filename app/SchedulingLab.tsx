@@ -312,6 +312,13 @@ function useProcessMotion(
           motionTimers.current.push(landingTimer);
         }
       };
+      const pulseCompletionDock = (dock: HTMLElement) => {
+        dock.classList.remove("completion-just-received");
+        void dock.offsetWidth;
+        dock.classList.add("completion-just-received");
+        const pulseTimer = window.setTimeout(() => dock.classList.remove("completion-just-received"), 520);
+        motionTimers.current.push(pulseTimer);
+      };
       const centeredTranslation = (source: DOMRect, destination: DOMRect) => ({
         x: destination.left + destination.width / 2 - (source.left + source.width / 2),
         y: destination.top + destination.height / 2 - (source.top + source.height / 2),
@@ -400,9 +407,22 @@ function useProcessMotion(
         if (!before) {
           const destination = center(next.rect);
           if (direction === "backward") {
-            const source = { x: Math.min(window.innerWidth - 36, destination.x + 180), y: destination.y };
+            const completionDock = root.querySelector<HTMLElement>("[data-motion-finish-target]");
+            const source = completionDock ? center(completionDock.getBoundingClientRect()) : { x: Math.min(window.innerWidth - 36, destination.x + 180), y: destination.y };
             const schedule = showArrow(source, destination, id, "finish", true);
-            travelCard(next.template, rectAround(source, next.rect.width, next.rect.height), next.rect, node, schedule);
+            const sourceRect = rectAround(source, next.rect.width, next.rect.height);
+            const traveler = createTraveler(next.template, sourceRect, node);
+            traveler.classList.add("process-completing");
+            traveler.dataset.motionDestination = "completed";
+            const delta = centeredTranslation(sourceRect, next.rect);
+            const animation = traveler.animate(
+              [
+                { opacity: .08, transform: "translate(0, 0)" },
+                { opacity: 1, transform: `translate(${delta.x}px, ${delta.y}px)` },
+              ],
+              { delay: schedule.delay + arrowLead, duration: schedule.duration - arrowLead, fill: "both", easing: "cubic-bezier(.2,.75,.2,1)" },
+            );
+            animation.finished.finally(() => finishTraveler(traveler, node));
             movements.push(`finished->${next.place}`);
             recordCue(id, "finish", next.place, true);
           } else if (next.place === "cpu") {
@@ -598,22 +618,33 @@ function useProcessMotion(
         if (current.has(id)) continue;
         const action: Action = direction === "forward" ? "finish" : "arrive";
         const source = center(before.rect);
-        const destination = direction === "forward"
-          ? { x: Math.min(window.innerWidth - 36, source.x + 180), y: source.y }
-          : { x: source.x, y: Math.max(36, source.y - 58) };
-        const deltaX = destination.x - source.x;
-        const deltaY = destination.y - source.y;
+        const completionDock = root.querySelector<HTMLElement>("[data-motion-finish-target]");
+        const destination = direction === "forward" && completionDock
+          ? center(completionDock.getBoundingClientRect())
+          : direction === "forward"
+            ? { x: Math.min(window.innerWidth - 36, source.x + 180), y: source.y }
+            : { x: source.x, y: Math.max(36, source.y - 58) };
+        const destinationRect = rectAround(destination, before.rect.width, before.rect.height);
+        const delta = centeredTranslation(before.rect, destinationRect);
         const schedule = showArrow(source, destination, id, action, direction === "backward");
         const traveler = createTraveler(before.template, before.rect);
+        if (action === "finish") {
+          traveler.classList.add("process-completing");
+          traveler.dataset.motionDestination = "completed";
+        }
         recordCue(id, action, direction === "forward" ? "finished" : "future", direction === "backward");
         const animation = traveler.animate(
           [
             { opacity: 1, transform: "translate(0, 0)" },
-            { opacity: .08, transform: `translate(${deltaX}px, ${deltaY}px)` },
+            { opacity: 1, transform: `translate(${delta.x}px, ${delta.y}px)`, offset: .78 },
+            { opacity: .06, transform: `translate(${delta.x}px, ${delta.y}px)`, offset: 1 },
           ],
           { delay: schedule.delay + arrowLead, duration: schedule.duration - arrowLead, fill: "backwards", easing: "cubic-bezier(.4,0,.2,1)" },
         );
-        animation.finished.finally(() => finishTraveler(traveler));
+        animation.finished.finally(() => {
+          finishTraveler(traveler);
+          if (action === "finish" && completionDock) pulseCompletionDock(completionDock);
+        });
         movements.push(`${before.place}->${direction === "forward" ? "finished" : "future"}`);
       }
     }
@@ -886,22 +917,24 @@ export default function SchedulingLab({
                   style={{ "--process-color": runningProcess.color } as React.CSSProperties}
                 >
                   <strong>{runningView.id}</strong>
-                  <span>{runningView.remainingTime} left{algorithm === "mlfq" ? ` · ${runningView.allotmentUsed}/${mlfqQuanta[runningView.queueLevel]} used` : ""}</span>
+                  <span>{runningView.remainingTime} left</span>
+                  {algorithm === "mlfq" && <small>Q{runningView.queueLevel} · {runningView.allotmentUsed}/{mlfqQuanta[runningView.queueLevel]}</small>}
+                  {algorithm === "rr" && <small>{runningView.allotmentUsed}/{quantum} slice</small>}
                   {algorithm === "mlfq" && <i className="allotment-meter" aria-hidden="true"><b style={{ width: `${runningView.allotmentUsed / mlfqQuanta[runningView.queueLevel] * 100}%` }} /></i>}
                 </div><div className="cpu-process-copy"><p>Executing now</p><h2>Process {runningProcess.id}</h2><span>{runningView.remainingTime} tick{runningView.remainingTime === 1 ? "" : "s"} remaining</span>{algorithm === "mlfq" && <small>Q{runningView.queueLevel} · {runningView.allotmentUsed}/{mlfqQuanta[runningView.queueLevel]} allotment used</small>}{algorithm === "rr" && <small>{runningView.allotmentUsed}/{quantum} quantum used</small>}</div></div> : <div className="idle-content"><div className="process-orb idle">—</div><div><p>Nothing dispatched</p><h2>CPU idle</h2><span>Waiting for work</span></div></div>}
                 <div className="cpu-progress"><span style={{ width: runningProcess ? `${((runningProcess.serviceTime - (snapshot.runningRemaining ?? 0)) / runningProcess.serviceTime) * 100}%` : "0%", background: runningProcess?.color }} /></div>
               </article>
-              <article className="event-card"><div className="card-label">AT THIS TIME BOUNDARY</div><div className="event-list" data-testid="event-list" data-event-count={snapshot.events.length}>{snapshot.events.length ? snapshot.events.map((event, index) => <p key={index}><span>{index + 1}</span>{event}</p>) : <p className="muted-event">No scheduling decision was needed.</p>}</div></article>
+              <article className="event-card"><div className="event-card-heading"><div className="card-label">AT THIS TIME BOUNDARY</div><div className="completion-dock" data-testid="completion-dock" data-motion-finish-target data-completed-count={completedCount} aria-label={`${completedCount} completed process${completedCount === 1 ? "" : "es"}`}><i aria-hidden="true">✓</i><span><small>COMPLETED</small><strong>{completedCount}</strong></span></div></div><div className="event-list" data-testid="event-list" data-event-count={snapshot.events.length}>{snapshot.events.length ? snapshot.events.map((event, index) => <p key={index}><span>{index + 1}</span>{event}</p>) : <p className="muted-event">No scheduling decision was needed.</p>}</div></article>
             </div>
 
-            <section className="queue-section card-surface"><div className="card-title-row"><div><p className="eyebrow">READY STATE</p><h2>{algorithm === "mlfq" ? "Priority feedback map" : "Ready queue"}</h2></div><div className="queue-summary"><span data-testid="state-counts" data-new-count={futureCount} data-ready-count={waitingCount} data-finished-count={completedCount}><b data-motion-future-target>{futureCount} future</b> · {waitingCount} waiting · <b data-motion-finish-target>{completedCount} finished</b></span>{algorithm === "mlfq" && <div className="boost-countdown" title={`Waiting processes return to Q0 in ${boostTicksRemaining} ticks`}><i className="boost-ring" style={{ "--boost-progress": `${boostProgress}%` } as React.CSSProperties}><b>{boostTicksRemaining}</b></i><span><strong>NEXT BOOST</strong><small>ticks remaining</small></span></div>}</div></div>
+            <section className="queue-section card-surface"><div className="card-title-row"><div><p className="eyebrow">READY STATE</p><h2>{algorithm === "mlfq" ? "Priority feedback map" : "Ready queue"}</h2></div><div className="queue-summary"><span data-testid="state-counts" data-new-count={futureCount} data-ready-count={waitingCount} data-finished-count={completedCount}><b data-motion-future-target>{futureCount} future</b> · {waitingCount} waiting</span>{algorithm === "mlfq" && <div className="boost-countdown" title={`Waiting processes return to Q0 in ${boostTicksRemaining} ticks`}><i className="boost-ring" style={{ "--boost-progress": `${boostProgress}%` } as React.CSSProperties}><b>{boostTicksRemaining}</b></i><span><strong>NEXT BOOST</strong><small>ticks remaining</small></span></div>}</div></div>
               <div className={algorithm === "mlfq" ? "multi-queues" : "single-queue"}>{snapshot.readyQueues.map((queue, queueIndex) => {
                 const allotted = mlfqQuanta[queueIndex];
                 return <div className="queue-row" key={queueIndex}>
                   {algorithm === "mlfq" && <div className="queue-label"><div><strong>Q{queueIndex}</strong></div><span>{queueIndex === 0 ? "Highest" : queueIndex === snapshot.readyQueues.length - 1 ? "Lowest" : "Medium"} · allotment {mlfqQuanta[queueIndex]}</span>{queueIndex < snapshot.readyQueues.length - 1 && <i className="demotion-cue">full allotment ↓</i>}</div>}
                   <div className="queue-track" data-testid={`ready-queue-${queueIndex}`} data-ready-ids={queue.join(",")}>
                     <span className="queue-head">HEAD</span>
-                    {queue.length === 0 ? <span className="empty-queue">Queue empty</span> : queue.map((id) => { const process = processById.get(id)!; const view = snapshot.processes.find((item) => item.id === id); const used = view?.allotmentUsed ?? 0; return <div className={`queue-chip ${algorithm === "mlfq" ? "mlfq-queue-chip" : ""}`} data-process-id={id} data-state="ready" data-remaining={view?.remainingTime} data-allotment-used={algorithm === "mlfq" ? used : undefined} data-motion-id={id} data-motion-place={algorithm === "mlfq" ? `q${queueIndex}` : "ready"} data-motion-color={process.color} key={id} style={{ "--process-color": process.color } as React.CSSProperties} title={algorithm === "mlfq" ? `${id}: ${used} of ${allotted} ticks used at Q${queueIndex}` : undefined}><strong>{id}</strong><span>{view?.remainingTime} left{algorithm === "mlfq" ? ` · ${used}/${allotted} used` : ""}</span>{algorithm === "mlfq" && <i className="allotment-meter" aria-hidden="true"><b style={{ width: `${used / allotted * 100}%` }} /></i>}</div>; })}
+                    {queue.length === 0 ? <span className="empty-queue">Queue empty</span> : queue.map((id) => { const process = processById.get(id)!; const view = snapshot.processes.find((item) => item.id === id); const used = view?.allotmentUsed ?? 0; return <div className={`queue-chip ${algorithm === "mlfq" ? "mlfq-queue-chip" : ""}`} data-process-id={id} data-state="ready" data-remaining={view?.remainingTime} data-allotment-used={algorithm === "mlfq" ? used : undefined} data-motion-id={id} data-motion-place={algorithm === "mlfq" ? `q${queueIndex}` : "ready"} data-motion-color={process.color} key={id} style={{ "--process-color": process.color } as React.CSSProperties} title={algorithm === "mlfq" ? `${id}: ${used} of ${allotted} ticks used at Q${queueIndex}` : undefined}><strong>{id}</strong><span>{view?.remainingTime} left</span>{algorithm === "mlfq" && <small>{used}/{allotted} used</small>}{algorithm === "mlfq" && <i className="allotment-meter" aria-hidden="true"><b style={{ width: `${used / allotted * 100}%` }} /></i>}</div>; })}
                     <span className="queue-tail">TAIL</span>
                   </div>
                 </div>;
