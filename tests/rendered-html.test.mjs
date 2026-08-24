@@ -39,11 +39,12 @@ test("server-renders the complete scheduling studio", async () => {
 });
 
 test("keeps the production source free of starter-preview wiring", async () => {
-  const [page, layout, packageJson, schedulingLab, stylesheet] = await Promise.all([
+  const [page, layout, packageJson, schedulingLab, motionController, stylesheet] = await Promise.all([
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
     readFile(new URL("../package.json", import.meta.url), "utf8"),
     readFile(new URL("../app/SchedulingLab.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/useTypedProcessMotion.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
   ]);
 
@@ -60,7 +61,8 @@ test("keeps the production source free of starter-preview wiring", async () => {
   assert.match(schedulingLab, /data-testid="state-counts"/);
   assert.match(schedulingLab, /data-ready-ids/);
   assert.match(schedulingLab, /data-timeline-time/);
-  assert.match(schedulingLab, /PRIORITY BOOST/);
+  assert.match(motionController, /PRIORITY BOOST/);
+  assert.match(motionController, /scheduling-motion-phase/);
   assert.match(schedulingLab, /motion-cue/);
   assert.doesNotMatch(schedulingLab, /gives up CPU one tick early|yield-toggle|state-flow/);
   assert.match(stylesheet, /\.boost-ring/);

@@ -25,14 +25,51 @@ export type ProcessView = ProcessDefinition & {
   allotmentUsed: number;
 };
 
-export type Snapshot = {
-  time: number;
+export type TransitionAction =
+  | "finish"
+  | "yield"
+  | "rotate"
+  | "demote"
+  | "boost"
+  | "arrive"
+  | "preempt"
+  | "dispatch";
+
+export type ProcessLocation = {
+  place: "future" | "cpu" | "ready" | "finished" | `q${number}`;
+  index?: number;
+};
+
+export type ProcessTransition = {
+  processId: string;
+  from: ProcessLocation;
+  to: ProcessLocation;
+};
+
+export type SchedulerVisualState = {
   running: string | null;
   readyQueues: string[][];
-  events: string[];
   processes: ProcessView[];
   runningRemaining: number | null;
   runningQueueLevel: number | null;
+};
+
+/**
+ * One authoritative visual phase at a scheduler boundary. Phases are emitted
+ * by the simulator in the exact order in which state mutations occur, so the
+ * UI never needs to infer intermediate movement from prose or DOM positions.
+ */
+export type TransitionPhase = {
+  action: TransitionAction;
+  moves: ProcessTransition[];
+  after: SchedulerVisualState;
+};
+
+export type Snapshot = SchedulerVisualState & {
+  time: number;
+  events: string[];
+  transitions: TransitionPhase[];
+  transitionStart: SchedulerVisualState;
 };
 
 export type TimelineSlice = {
@@ -179,13 +216,49 @@ export function simulate(
 
   while (time <= maximumTime) {
     const events: string[] = [];
+    const transitions: TransitionPhase[] = [];
     let expired: RuntimeProcess | null = null;
     let yielded: RuntimeProcess | null = null;
 
+    // Expired/yielded work is logically pending requeue, but it remains
+    // visually on the CPU until the explicit rotate/yield/demote phase. This
+    // prevents the process card from disappearing during earlier same-boundary
+    // arrival phases without changing scheduler event ordering.
+    const visualState = (): SchedulerVisualState => {
+      const visualRunner = running ?? expired ?? yielded;
+      return {
+        running: visualRunner?.id ?? null,
+        readyQueues: queues.map((queue) => queue.map((process) => process.id)),
+        processes: makeViews(processes, queues, visualRunner),
+        runningRemaining: visualRunner?.remainingTime ?? null,
+        runningQueueLevel: visualRunner?.queueLevel ?? null,
+      };
+    };
+    const transitionStart = visualState();
+
+    const queuePlace = (level: number): ProcessLocation["place"] =>
+      config.algorithm === "mlfq" ? `q${level}` : "ready";
+    const addMoves = (action: TransitionAction, moves: ProcessTransition[]) => {
+      if (moves.length === 0) return;
+      const last = transitions.at(-1);
+      if (last?.action === action) {
+        last.moves.push(...moves);
+        last.after = visualState();
+      } else {
+        transitions.push({ action, moves, after: visualState() });
+      }
+    };
+
     if (running?.remainingTime === 0) {
-      running.completionTime = time;
-      events.push(`${running.id} finished and left the system.`);
+      const finished = running;
+      finished.completionTime = time;
       running = null;
+      addMoves("finish", [{
+        processId: finished.id,
+        from: { place: "cpu" },
+        to: { place: "finished" },
+      }]);
+      events.push(`${finished.id} finished and left the system.`);
     }
 
     const boostDue = boostInterval !== null && time > 0 && time % boostInterval === 0;
@@ -214,33 +287,57 @@ export function simulate(
 
     const enqueueYielded = () => {
       if (!yielded) return;
-      const allotted = config.mlfqQuanta[yielded.queueLevel];
-      yielded.boostProtected = false;
-      queues[yielded.queueLevel].push(yielded);
-      events.push(
-        `${yielded.id} gave up the CPU one tick early at Q${yielded.queueLevel}; ${yielded.quantumUsed}/${allotted} used ticks remain accounted.`,
-      );
+      const process = yielded;
+      const allotted = config.mlfqQuanta[process.queueLevel];
+      process.boostProtected = false;
+      queues[process.queueLevel].push(process);
       yielded = null;
+      addMoves("yield", [{
+        processId: process.id,
+        from: { place: "cpu" },
+        to: {
+          place: queuePlace(process.queueLevel),
+          index: queues[process.queueLevel].length - 1,
+        },
+      }]);
+      events.push(
+        `${process.id} gave up the CPU one tick early at Q${process.queueLevel}; ${process.quantumUsed}/${allotted} used ticks remain accounted.`,
+      );
     };
 
     const enqueueExpired = () => {
       if (!expired) return;
-      expired.boostProtected = false;
-      expired.quantumUsed = 0;
+      const process = expired;
+      process.boostProtected = false;
+      process.quantumUsed = 0;
       if (config.algorithm === "mlfq") {
-        const previousLevel = expired.queueLevel;
-        expired.queueLevel = Math.min(previousLevel + 1, queueCount - 1);
-        queues[expired.queueLevel].push(expired);
+        const previousLevel = process.queueLevel;
+        process.queueLevel = Math.min(previousLevel + 1, queueCount - 1);
+        queues[process.queueLevel].push(process);
+        expired = null;
+        addMoves("demote", [{
+          processId: process.id,
+          from: { place: "cpu" },
+          to: {
+            place: queuePlace(process.queueLevel),
+            index: queues[process.queueLevel].length - 1,
+          },
+        }]);
         events.push(
-          previousLevel === expired.queueLevel
-            ? `${expired.id} used its full allotment and returned to Q${expired.queueLevel}.`
-            : `${expired.id} used its full allotment and moved from Q${previousLevel} to Q${expired.queueLevel}.`,
+          previousLevel === process.queueLevel
+            ? `${process.id} used its full allotment and returned to Q${process.queueLevel}.`
+            : `${process.id} used its full allotment and moved from Q${previousLevel} to Q${process.queueLevel}.`,
         );
       } else {
-        queues[0].push(expired);
-        events.push(`${expired.id}'s quantum expired; it moved to the back of the ready queue.`);
+        queues[0].push(process);
+        expired = null;
+        addMoves("rotate", [{
+          processId: process.id,
+          from: { place: "cpu" },
+          to: { place: "ready", index: queues[0].length - 1 },
+        }]);
+        events.push(`${process.id}'s quantum expired; it moved to the back of the ready queue.`);
       }
-      expired = null;
     };
 
     // When an MLFQ allotment expires on the exact boost boundary, account for
@@ -251,13 +348,26 @@ export function simulate(
       enqueueYielded();
       enqueueExpired();
 
-      const boosted = queues.flat();
+      const boostOrigins = queues.flatMap((queue, level) =>
+        queue.map((process, index) => ({ process, from: { place: queuePlace(level), index } as ProcessLocation })),
+      );
+      const boostChangesVisibleState = boostOrigins.some(({ process, from }, index) =>
+        from.place !== "q0" || from.index !== index || process.queueLevel !== 0 || process.quantumUsed !== 0,
+      );
+      const boosted = boostOrigins.map(({ process }) => process);
       for (const queue of queues) queue.length = 0;
       for (const process of boosted) {
         process.queueLevel = 0;
         process.quantumUsed = 0;
         process.boostProtected = false;
         queues[0].push(process);
+      }
+      if (boostChangesVisibleState) {
+        addMoves("boost", boostOrigins.map(({ process, from }, index) => ({
+          processId: process.id,
+          from,
+          to: { place: "q0", index },
+        })));
       }
 
       if (running) {
@@ -280,6 +390,11 @@ export function simulate(
       process.queueLevel = 0;
       process.quantumUsed = 0;
       queues[0].push(process);
+      addMoves("arrive", [{
+        processId: process.id,
+        from: { place: "future" },
+        to: { place: queuePlace(0), index: queues[0].length - 1 },
+      }]);
       events.push(`${process.id} arrived and joined ${queueCount > 1 ? "Q0" : "the ready queue"}.`);
     }
 
@@ -291,12 +406,18 @@ export function simulate(
         process.remainingTime < best.remainingTime ? process : best,
       );
       if (contender.remainingTime < running.remainingTime) {
+        const preempted = running;
         events.push(
-          `${contender.id} has less remaining time, so ${running.id} was preempted.`,
+          `${contender.id} has less remaining time, so ${preempted.id} was preempted.`,
         );
-        running.quantumUsed = 0;
-        queues[0].push(running);
+        preempted.quantumUsed = 0;
+        queues[0].push(preempted);
         running = null;
+        addMoves("preempt", [{
+          processId: preempted.id,
+          from: { place: "cpu" },
+          to: { place: "ready", index: queues[0].length - 1 },
+        }]);
       }
     }
 
@@ -305,18 +426,40 @@ export function simulate(
         (queue, index) => index < running!.queueLevel && queue.length > 0,
       );
       if (higherQueueReady) {
-        events.push(`${running.id} was preempted by a process in a higher-priority queue.`);
-        running.boostProtected = false;
-        queues[running.queueLevel].unshift(running);
+        const preempted = running;
+        events.push(`${preempted.id} was preempted by a process in a higher-priority queue.`);
+        preempted.boostProtected = false;
+        queues[preempted.queueLevel].unshift(preempted);
         running = null;
+        addMoves("preempt", [{
+          processId: preempted.id,
+          from: { place: "cpu" },
+          to: { place: queuePlace(preempted.queueLevel), index: 0 },
+        }]);
       }
     }
 
     if (!running) {
+      const queuesBeforeDispatch = queues.map((queue) => [...queue]);
       running = chooseNext(config.algorithm, queues);
       if (running) {
+        let sourceLevel = 0;
+        let sourceIndex = 0;
+        for (const [level, queue] of queuesBeforeDispatch.entries()) {
+          const index = queue.findIndex((process) => process.id === running!.id);
+          if (index >= 0) {
+            sourceLevel = level;
+            sourceIndex = index;
+            break;
+          }
+        }
         running.boostProtected = false;
         if (running.firstRunTime === null) running.firstRunTime = time;
+        addMoves("dispatch", [{
+          processId: running.id,
+          from: { place: queuePlace(sourceLevel), index: sourceIndex },
+          to: { place: "cpu" },
+        }]);
         events.push(`${running.id} was selected as ${describeAlgorithm(config.algorithm)}.`);
       }
     }
@@ -330,12 +473,10 @@ export function simulate(
 
     snapshots.push({
       time,
-      running: running?.id ?? null,
-      readyQueues: queues.map((queue) => queue.map((process) => process.id)),
       events,
-      processes: makeViews(processes, queues, running),
-      runningRemaining: running?.remainingTime ?? null,
-      runningQueueLevel: running?.queueLevel ?? null,
+      transitions,
+      transitionStart,
+      ...visualState(),
     });
 
     if (allFinished || (!running && !futureArrival && queues.every((queue) => queue.length === 0))) {

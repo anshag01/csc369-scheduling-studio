@@ -94,13 +94,14 @@ input { min-width: 0; padding: 8px 9px; }
 .time-readout { display: flex; align-items: baseline; gap: 6px; padding-left: 18px; border-left: 1px solid var(--line); }
 .time-readout span { color: #8a9299; font: 9px var(--font-dm-mono), monospace; }
 .time-readout strong { min-width: 30px; font: 500 25px var(--font-dm-mono), monospace; }
-.speed-control { display: flex; align-items: center; gap: 7px; margin-left: auto; color: var(--muted); font-size: 10px; }
+.speed-control { display: flex; align-items: center; gap: 7px; color: var(--muted); font-size: 10px; }
 .speed-control select { width: 82px; padding: 7px; }
 .metrics-toggle { padding: 7px 10px; color: #5f6670; background: #f2f2ef; border: 1px solid #ddddda; border-radius: 5px; font-size: 9px; font-weight: 700; white-space: nowrap; }
 .metrics-toggle.active { color: #fff; background: #202123; border-color: #202123; }
 .keyboard-hint { color: #9aa1a8; font-size: 9px; }
 kbd { padding: 2px 4px; color: #5d5d58; background: #f1f1ee; border: 1px solid #dcdcd8; border-bottom-width: 2px; border-radius: 3px; font: 9px var(--font-dm-mono), monospace; }
-.motion-cue { position: absolute; z-index: 60; top: 88px; left: 50%; max-width: min(760px, 78%); display: flex; align-items: center; gap: 8px; padding: 6px 11px 6px 7px; color: #fff; background: rgba(32,33,35,.96); border: 1px solid rgba(255,255,255,.2); border-radius: 999px; box-shadow: 0 8px 24px rgba(20,22,28,.2); transform: translateX(-50%); pointer-events: none; white-space: nowrap; }
+.motion-cue-slot { min-width: 0; flex: 1 1 260px; display: flex; justify-content: center; }
+.motion-cue { min-width: 0; max-width: 100%; display: flex; align-items: center; gap: 8px; padding: 6px 11px 6px 7px; color: #fff; background: rgba(32,33,35,.96); border: 1px solid rgba(255,255,255,.2); border-radius: 999px; box-shadow: 0 5px 16px rgba(20,22,28,.16); pointer-events: none; white-space: nowrap; }
 .motion-cue span { padding: 3px 6px; color: #202123; background: #fff; border-radius: 999px; font: 700 7px var(--font-dm-mono), monospace; letter-spacing: .08em; }
 .motion-cue strong { min-width: 0; overflow: hidden; font: 500 9px var(--font-dm-mono), monospace; text-overflow: ellipsis; }
 
@@ -116,7 +117,7 @@ kbd { padding: 2px 4px; color: #5d5d58; background: #f1f1ee; border: 1px solid #
 .process-orb.idle { color: #9ca3aa; background: #eef0f1; }
 .running-content p, .idle-content p { margin: 0 0 2px; color: #9098a0; font-size: 10px; }
 .running-content h2, .idle-content h2 { margin: 0 0 3px; font-size: 21px; letter-spacing: -.04em; }
-.running-content div > span, .idle-content div > span { color: #6f7881; font: 10px var(--font-dm-mono), monospace; }
+.cpu-process-copy > span, .idle-content div > span { color: #6f7881; font: 10px var(--font-dm-mono), monospace; }
 .running-allotment { position: relative; width: min(190px, 100%); height: 4px; margin-top: 8px; overflow: visible; background: #e4e6ed; border-radius: 999px; }
 .running-allotment > i { display: block; height: 100%; background: var(--accent); border-radius: inherit; transition: width .2s ease; }
 .running-allotment > small { position: absolute; top: 6px; right: 0; color: #8a919a; font: 7px var(--font-dm-mono), monospace; text-transform: uppercase; }
@@ -176,6 +177,7 @@ kbd { padding: 2px 4px; color: #5d5d58; background: #f1f1ee; border: 1px solid #
 .empty-queue { margin: auto; color: #a4abb1; font-size: 10px; font-style: italic; }
 [data-motion-id] { position: relative; will-change: transform; }
 .process-is-moving { outline: 2px solid var(--process-color); outline-offset: 2px; filter: drop-shadow(0 7px 12px rgba(32,33,35,.24)); }
+.process-layout-shift { position: relative; z-index: 1; will-change: transform; }
 .process-motion-traveler { position: fixed !important; z-index: 9999 !important; margin: 0 !important; pointer-events: none !important; transform-origin: center !important; overflow: hidden; contain: layout paint; }
 .process-just-landed { animation: process-land .36s ease-out; }
 @keyframes process-land { 0% { box-shadow: 0 0 0 3px color-mix(in srgb, var(--process-color) 38%, transparent), 0 8px 18px rgba(32,33,35,.12); } 100% { box-shadow: 0 3px 8px rgba(0,0,0,.045); } }
@@ -270,7 +272,7 @@ footer { display: flex; justify-content: space-between; gap: 16px; padding: 13px
   .json-panel summary { font-size: 9px; }
 
   .simulation-panel { height: 100%; min-height: 0; display: flex; flex-direction: column; padding: 9px 12px 11px; overflow: hidden; }
-  .motion-cue { top: 57px; max-width: 76%; padding: 4px 8px 4px 5px; }
+  .motion-cue { padding: 4px 8px 4px 5px; }
   .motion-cue span { padding: 2px 5px; font-size: 6px; }
   .motion-cue strong { font-size: 7px; }
   .control-strip { min-height: 43px; margin-bottom: 7px; padding: 5px 9px; }
