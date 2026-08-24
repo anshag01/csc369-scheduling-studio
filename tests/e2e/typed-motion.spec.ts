@@ -50,6 +50,14 @@ async function expectPhase(page: Page, action: string, index: number, count: num
   return observation;
 }
 
+async function expectReadyCorridor(page: Page, action: string) {
+  const traveler = page.locator(`.process-motion-traveler[data-motion-action="${action}"]`);
+  const guide = page.locator(`.process-motion-arrow[data-motion-action="${action}"]`);
+  await expect(traveler).toHaveCount(1);
+  await expect(traveler).toHaveAttribute("data-motion-route", "ready-corridor");
+  await expect(guide).toHaveAttribute("data-motion-route", "ready-corridor");
+}
+
 async function armTravelerOverlapSampler(page: Page, key: string, action: string) {
   await page.evaluate(({ sampleKey, expectedAction }) => {
     type Sample = { maximum: number; samples: number; done: boolean };
@@ -330,31 +338,32 @@ test("a redispatched card visibly reaches the real queue before returning to the
   expect(rotationGeometry.height).toBeGreaterThan(40);
 });
 
-test("default Round Robin routes rotating and dispatched cards around the ready queue", async ({ page }) => {
-  await page.locator("#algorithm").selectOption("rr");
-  await page.getByRole("spinbutton", { name: "Time quantum" }).fill("2");
+test("every single-ready-queue policy routes process cards around waiting cards", async ({ page }) => {
+  test.slow();
   await page.locator(".speed-control select").selectOption("850");
 
-  for (const sourceTime of [3, 8]) {
-    await page.locator(`[data-timeline-time="${sourceTime}"]`).click();
-    const key = `default-rr-${sourceTime + 1}`;
+  const cases = [
+    { algorithm: "fcfs", sourceTime: 8, afterCpu: "C", afterReady: "D,E", beforeCpu: "B", beforeReady: "C,D,E" },
+    { algorithm: "sjf", sourceTime: 8, afterCpu: "E", afterReady: "C,D", beforeCpu: "B", beforeReady: "C,D,E" },
+    { algorithm: "stcf", sourceTime: 9, afterCpu: "B", afterReady: "D", beforeCpu: "E", beforeReady: "B,D" },
+    { algorithm: "rr", sourceTime: 8, afterCpu: "D", afterReady: "C,E,B", beforeCpu: "B", beforeReady: "D,C,E" },
+  ] as const;
+
+  for (const scenario of cases) {
+    await page.locator("#algorithm").selectOption(scenario.algorithm);
+    if (scenario.algorithm === "rr") {
+      await page.getByRole("spinbutton", { name: "Time quantum" }).fill("2");
+    }
+    await page.locator(`[data-timeline-time="${scenario.sourceTime}"]`).click();
+    const key = `${scenario.algorithm}-ready-corridor-${scenario.sourceTime + 1}`;
     await armTravelerToProcessSampler(page, key);
     await page.getByRole("button", { name: "Next time step" }).click();
 
-    const phaseCount = sourceTime === 3 ? 3 : 2;
-    const rotateIndex = sourceTime === 3 ? 1 : 0;
-    if (sourceTime === 3) await expectPhase(page, "arrive", 0, phaseCount);
-    await expectPhase(page, "rotate", rotateIndex, phaseCount);
-    await expect(page.locator('.process-motion-traveler[data-motion-action="rotate"]'))
-      .toHaveAttribute("data-motion-route", "ready-corridor");
-    await expect(page.locator('.process-motion-arrow[data-motion-action="rotate"]'))
-      .toHaveAttribute("data-motion-route", "ready-corridor");
-
-    await expectPhase(page, "dispatch", rotateIndex + 1, phaseCount);
-    await expect(page.locator('.process-motion-traveler[data-motion-action="dispatch"]'))
-      .toHaveAttribute("data-motion-route", "ready-corridor");
-    await expect(page.locator('.process-motion-arrow[data-motion-action="dispatch"]'))
-      .toHaveAttribute("data-motion-route", "ready-corridor");
+    const firstAction = scenario.algorithm === "rr" ? "rotate" : "finish";
+    await expectPhase(page, firstAction, 0, 2);
+    if (firstAction === "rotate") await expectReadyCorridor(page, "rotate");
+    await expectPhase(page, "dispatch", 1, 2);
+    await expectReadyCorridor(page, "dispatch");
 
     const sample = await readTravelerToProcessSample(page, key);
     expect(sample.samples).toBeGreaterThan(20);
@@ -362,39 +371,62 @@ test("default Round Robin routes rotating and dispatched cards around the ready 
     await expect(page.locator(".dashboard-grid")).toHaveAttribute("data-motion-status", "idle");
     await expect(page.getByTestId("cpu-process-card")).toHaveAttribute(
       "data-process-id",
-      sourceTime === 3 ? "A" : "D",
+      scenario.afterCpu,
     );
     await expect(page.getByTestId("ready-queue-0")).toHaveAttribute(
       "data-ready-ids",
-      sourceTime === 3 ? "C,B" : "C,E,B",
+      scenario.afterReady,
     );
 
     const reverseKey = `${key}-reverse`;
     await armTravelerToProcessSampler(page, reverseKey);
     await page.getByRole("button", { name: "Previous time step" }).click();
 
-    await expectPhase(page, "dispatch", 0, phaseCount);
-    await expect(page.locator('.process-motion-traveler[data-motion-action="dispatch"]'))
-      .toHaveAttribute("data-motion-route", "ready-corridor");
-    await expect(page.locator('.process-motion-arrow[data-motion-action="dispatch"]'))
-      .toHaveAttribute("data-motion-route", "ready-corridor");
-
-    await expectPhase(page, "rotate", 1, phaseCount);
-    await expect(page.locator('.process-motion-traveler[data-motion-action="rotate"]'))
-      .toHaveAttribute("data-motion-route", "ready-corridor");
-    await expect(page.locator('.process-motion-arrow[data-motion-action="rotate"]'))
-      .toHaveAttribute("data-motion-route", "ready-corridor");
+    await expectPhase(page, "dispatch", 0, 2);
+    await expectReadyCorridor(page, "dispatch");
+    await expectPhase(page, firstAction, 1, 2);
+    if (firstAction === "rotate") await expectReadyCorridor(page, "rotate");
 
     const reverseSample = await readTravelerToProcessSample(page, reverseKey);
     expect(reverseSample.samples).toBeGreaterThan(20);
     expect(reverseSample.maximum, JSON.stringify(reverseSample.worst)).toBeLessThan(.001);
     await expect(page.locator(".dashboard-grid")).toHaveAttribute("data-motion-status", "idle");
-    await expect(page.getByTestId("cpu-process-card")).toHaveAttribute("data-process-id", "B");
+    await expect(page.getByTestId("cpu-process-card")).toHaveAttribute("data-process-id", scenario.beforeCpu);
     await expect(page.getByTestId("ready-queue-0")).toHaveAttribute(
       "data-ready-ids",
-      sourceTime === 3 ? "A" : "D,C,E",
+      scenario.beforeReady,
     );
   }
+
+  // STCF is the only single-queue policy that can send the running process
+  // back to ready without a quantum expiry. Exercise both directions in the
+  // same boundary, including their exact reverse playback order.
+  await page.locator("#algorithm").selectOption("stcf");
+  await page.locator('[data-timeline-time="3"]').click();
+  await armTravelerToProcessSampler(page, "stcf-preempt-corridor");
+  await page.getByRole("button", { name: "Next time step" }).click();
+  await expectPhase(page, "arrive", 0, 3);
+  await expectPhase(page, "preempt", 1, 3);
+  await expectReadyCorridor(page, "preempt");
+  await expectPhase(page, "dispatch", 2, 3);
+  await expectReadyCorridor(page, "dispatch");
+  const preemptSample = await readTravelerToProcessSample(page, "stcf-preempt-corridor");
+  expect(preemptSample.samples).toBeGreaterThan(20);
+  expect(preemptSample.maximum, JSON.stringify(preemptSample.worst)).toBeLessThan(.001);
+  await expect(page.getByTestId("cpu-process-card")).toHaveAttribute("data-process-id", "C");
+  await expect(page.getByTestId("ready-queue-0")).toHaveAttribute("data-ready-ids", "B");
+
+  await armTravelerToProcessSampler(page, "stcf-preempt-corridor-reverse");
+  await page.getByRole("button", { name: "Previous time step" }).click();
+  await expectPhase(page, "dispatch", 0, 3);
+  await expectReadyCorridor(page, "dispatch");
+  await expectPhase(page, "preempt", 1, 3);
+  await expectReadyCorridor(page, "preempt");
+  const reversePreemptSample = await readTravelerToProcessSample(page, "stcf-preempt-corridor-reverse");
+  expect(reversePreemptSample.samples).toBeGreaterThan(20);
+  expect(reversePreemptSample.maximum, JSON.stringify(reversePreemptSample.worst)).toBeLessThan(.001);
+  await expect(page.getByTestId("cpu-process-card")).toHaveAttribute("data-process-id", "B");
+  await expect(page.getByTestId("ready-queue-0")).toHaveAttribute("data-ready-ids", "");
 });
 
 test("simultaneous arrivals use separate staging lanes and preserve queue order", async ({ page }) => {
