@@ -176,9 +176,12 @@ kbd { padding: 2px 4px; color: #5d5d58; background: #f1f1ee; border: 1px solid #
 .allotment-meter b { height: 100%; display: block; background: var(--accent); border-radius: inherit; transition: width .2s ease; }
 .empty-queue { margin: auto; color: #a4abb1; font-size: 10px; font-style: italic; }
 [data-motion-id] { position: relative; will-change: transform; }
-.process-is-moving { outline: 2px solid var(--process-color); outline-offset: 2px; filter: drop-shadow(0 7px 12px rgba(32,33,35,.24)); }
+.process-is-moving { outline: 2px solid var(--process-color); outline-offset: 2px; box-shadow: 0 0 0 4px rgba(255,255,255,.94), 0 10px 24px rgba(32,33,35,.28) !important; filter: drop-shadow(0 3px 5px rgba(32,33,35,.16)); }
 .process-layout-shift { position: relative; z-index: 1; will-change: transform; }
-.process-motion-traveler { position: fixed !important; z-index: 9999 !important; margin: 0 !important; pointer-events: none !important; transform-origin: center !important; overflow: hidden; contain: layout paint; }
+.process-motion-bystander { opacity: .48; filter: saturate(.45); transition: opacity .16s ease, filter .16s ease; }
+.process-motion-traveler { position: fixed !important; z-index: var(--motion-z-index, 10000) !important; margin: 0 !important; pointer-events: none !important; transform-origin: center !important; overflow: hidden; contain: layout paint; }
+.process-motion-traveler[data-motion-batch="true"]::after { content: attr(data-motion-order); position: absolute; top: 3px; right: 3px; min-width: 16px; padding: 1px 3px; color: #fff; background: rgba(32,33,35,.9); border: 1px solid rgba(255,255,255,.72); border-radius: 999px; font: 700 6px/1.2 var(--font-dm-mono), monospace; letter-spacing: 0; }
+.process-motion-target-slot { position: fixed; z-index: 9997; box-sizing: border-box; display: grid; place-items: center; pointer-events: none; color: color-mix(in srgb, var(--process-color) 78%, #202123); background: color-mix(in srgb, var(--process-color) 7%, #fff); border: 1px dashed color-mix(in srgb, var(--process-color) 72%, #fff); border-top-width: 3px; border-radius: 5px; box-shadow: inset 0 0 0 2px rgba(255,255,255,.78), 0 0 0 2px rgba(255,255,255,.82); font: 700 11px var(--font-dm-mono), monospace; }
 .process-just-landed { animation: process-land .36s ease-out; }
 @keyframes process-land { 0% { box-shadow: 0 0 0 3px color-mix(in srgb, var(--process-color) 38%, transparent), 0 8px 18px rgba(32,33,35,.12); } 100% { box-shadow: 0 3px 8px rgba(0,0,0,.045); } }
 .process-motion-ghost { position: fixed; z-index: 9999; display: grid; place-items: center; pointer-events: none; color: var(--ink); background: #fff; border: 1px solid #dededb; border-top: 3px solid var(--process-color); border-radius: 5px; box-shadow: 0 12px 28px rgba(32,33,35,.2); font: 500 13px var(--font-dm-mono), monospace; }

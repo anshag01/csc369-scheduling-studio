@@ -22,6 +22,11 @@ type PhasePlan = {
   reverse: boolean;
 };
 
+type TravelRoute = {
+  keyframes: Keyframe[];
+  lane: number;
+};
+
 const actionLabel: Record<TransitionAction, string> = {
   finish: "FINISH",
   yield: "YIELD",
@@ -70,16 +75,105 @@ function clearArtifacts() {
     element.style.visibility = "";
     element.removeAttribute("data-motion-hidden");
   });
-  document.querySelectorAll(".process-motion-arrow, .process-motion-traveler, .process-motion-ghost")
+  document.querySelectorAll(".process-motion-arrow, .process-motion-traveler, .process-motion-ghost, .process-motion-target-slot")
     .forEach((element) => element.remove());
   document.querySelectorAll(".process-is-moving")
     .forEach((element) => element.classList.remove("process-is-moving"));
+  document.querySelectorAll<HTMLElement>(".process-motion-target")
+    .forEach((element) => {
+      element.classList.remove("process-motion-target");
+      element.removeAttribute("data-motion-target-for");
+    });
   document.querySelectorAll(".process-layout-shift")
     .forEach((element) => element.classList.remove("process-layout-shift"));
+  document.querySelectorAll(".process-motion-bystander")
+    .forEach((element) => element.classList.remove("process-motion-bystander"));
   document.querySelectorAll(".process-just-landed")
     .forEach((element) => element.classList.remove("process-just-landed"));
   document.querySelectorAll(".completion-just-received")
     .forEach((element) => element.classList.remove("completion-just-received"));
+}
+
+function clamp(value: number, minimum: number, maximum: number) {
+  return Math.min(maximum, Math.max(minimum, value));
+}
+
+function travelRoute(
+  sourceRect: DOMRect,
+  targetRect: DOMRect,
+  lane: number,
+  normal: { x: number; y: number },
+  bounds: DOMRect,
+  moveCount: number,
+  fadesIn: boolean,
+  fadesOut: boolean,
+): TravelRoute {
+  const sourceCenter = center(sourceRect);
+  const targetCenter = center(targetRect);
+  const deltaX = targetCenter.x - sourceCenter.x;
+  const deltaY = targetCenter.y - sourceCenter.y;
+
+  // A phase remains one atomic scheduling event, but concurrent cards fan out
+  // through stable visual lanes so one process never fully masks another.
+  // Reversing both the move order and route direction produces the same bend.
+  const fan = moveCount > 1
+    ? Math.min(
+      168,
+      Math.max(sourceRect.width, targetRect.width) * (moveCount - 1) / 2 + 14,
+    )
+    : 0;
+  const rawMidX = sourceCenter.x + deltaX * .5 + normal.x * fan * lane;
+  const rawMidY = sourceCenter.y + deltaY * .5 + normal.y * fan * lane;
+  const halfWidth = Math.max(sourceRect.width, targetRect.width) / 2;
+  const halfHeight = Math.max(sourceRect.height, targetRect.height) / 2;
+  const midX = clamp(rawMidX, bounds.left + halfWidth + 8, bounds.right - halfWidth - 8);
+  const midY = clamp(rawMidY, bounds.top + halfHeight + 8, bounds.bottom - halfHeight - 8);
+
+  return {
+    lane,
+    keyframes: [
+      { opacity: fadesIn ? .08 : 1, transform: "translate(0, 0)", offset: 0 },
+      {
+        opacity: 1,
+        transform: `translate(${midX - sourceCenter.x}px, ${midY - sourceCenter.y}px)`,
+        offset: .5,
+      },
+      {
+        opacity: fadesOut ? .08 : 1,
+        transform: `translate(${deltaX}px, ${deltaY}px)`,
+        offset: 1,
+      },
+    ],
+  };
+}
+
+function batchRouteLanes(routes: Array<{ sourceRect: DOMRect; targetRect: DOMRect }>) {
+  if (routes.length === 0) return { lanes: [] as number[], normal: { x: 0, y: 1 } };
+
+  const direction = routes.reduce((sum, route) => {
+    const source = center(route.sourceRect);
+    const target = center(route.targetRect);
+    return { x: sum.x + target.x - source.x, y: sum.y + target.y - source.y };
+  }, { x: 0, y: 0 });
+  const distance = Math.hypot(direction.x, direction.y);
+  const normal = distance < 1
+    ? { x: 0, y: 1 }
+    : { x: -direction.y / distance, y: direction.x / distance };
+  const projections = routes.map((route, index) => {
+    const source = center(route.sourceRect);
+    const target = center(route.targetRect);
+    const midpoint = { x: (source.x + target.x) / 2, y: (source.y + target.y) / 2 };
+    return { index, projection: midpoint.x * normal.x + midpoint.y * normal.y };
+  });
+  const ranked = [...projections].sort((left, right) =>
+    left.projection - right.projection || left.index - right.index,
+  );
+  const middle = (routes.length - 1) / 2;
+  const lanes = Array<number>(routes.length).fill(0);
+  ranked.forEach((route, rank) => {
+    lanes[route.index] = middle === 0 ? 0 : (rank - middle) / middle;
+  });
+  return { lanes, normal };
 }
 
 function wait(milliseconds: number, signal: AbortSignal) {
@@ -383,8 +477,20 @@ export function useTypedProcessMotion(
 
         const targets = new Map<string, DOMRect>();
         const travelers: HTMLElement[] = [];
+        const targetSlots: HTMLElement[] = [];
         const animations: Animation[] = [];
         const movingIds = new Set(phase.moves.map((move) => move.processId));
+
+        for (const node of root.querySelectorAll<HTMLElement>("[data-motion-id]")) {
+          const processId = node.dataset.motionId;
+          if (
+            processId &&
+            !movingIds.has(processId) &&
+            node.dataset.motionPlace !== "cpu"
+          ) {
+            node.classList.add("process-motion-bystander");
+          }
+        }
 
         if (!reducedMotion) {
           for (const node of root.querySelectorAll<HTMLElement>("[data-motion-id]")) {
@@ -419,6 +525,41 @@ export function useTypedProcessMotion(
           }
         }
 
+        const routeInputs = phase.moves.flatMap((move) => {
+          const targetNode = findMotionNode(root, move.processId);
+          const knownSource = sources.get(move.processId);
+          const template = knownSource?.template ?? (targetNode?.cloneNode(true) as HTMLElement | undefined);
+          if (!template) return [];
+          const width = knownSource?.rect.width ?? targetNode?.getBoundingClientRect().width ?? 96;
+          const height = knownSource?.rect.height ?? targetNode?.getBoundingClientRect().height ?? 52;
+          const targetRect = targetNode?.getBoundingClientRect()
+            ?? sourceForMissingCard(root, move.to, width, height, knownSource?.rect);
+          const sourceRect = knownSource?.rect
+            ?? sourceForMissingCard(root, move.from, width, height, targetRect);
+          const sourceCenter = center(sourceRect);
+          const targetCenter = center(targetRect);
+          return Math.hypot(targetCenter.x - sourceCenter.x, targetCenter.y - sourceCenter.y) < 2
+            ? []
+            : [{
+              processId: move.processId,
+              sourceRect,
+              targetRect,
+              fromPlace: move.from.place,
+              toPlace: move.to.place,
+            }];
+        });
+        const batchRouting = batchRouteLanes(routeInputs);
+        const mixedRouteKinds = new Set(routeInputs.map((route) =>
+          `${route.fromPlace}->${route.toPlace}`,
+        )).size > 1;
+        const trafficStagger = mixedRouteKinds
+          ? Math.min(520, Math.max(300, moveDuration * .46))
+          : 0;
+        const routeByProcess = new Map(routeInputs.map((route, routeIndex) => [
+          route.processId,
+          { lane: batchRouting.lanes[routeIndex], order: routeIndex },
+        ]));
+
         for (const [moveIndex, move] of phase.moves.entries()) {
           const targetNode = findMotionNode(root, move.processId);
           const knownSource = sources.get(move.processId);
@@ -448,6 +589,14 @@ export function useTypedProcessMotion(
           });
           traveler.removeAttribute("data-motion-id");
           traveler.removeAttribute("data-testid");
+          traveler.classList.remove(
+            "process-just-landed",
+            "completion-just-received",
+            "process-layout-shift",
+            "process-motion-target",
+          );
+          traveler.removeAttribute("data-motion-hidden");
+          traveler.removeAttribute("data-motion-target-for");
           traveler.classList.add("process-motion-traveler", "process-is-moving");
           traveler.dataset.processId = move.processId;
           traveler.dataset.motionAction = phase.action;
@@ -468,20 +617,47 @@ export function useTypedProcessMotion(
           if (targetNode) {
             targetNode.style.visibility = "hidden";
             targetNode.dataset.motionHidden = "true";
+            targetNode.dataset.motionTargetFor = move.processId;
+            targetNode.classList.add("process-motion-target");
+
+            const targetSlot = document.createElement("div");
+            targetSlot.className = "process-motion-target-slot";
+            targetSlot.dataset.motionTargetFor = move.processId;
+            targetSlot.setAttribute("aria-hidden", "true");
+            targetSlot.textContent = move.processId;
+            targetSlot.style.left = `${targetRect.left}px`;
+            targetSlot.style.top = `${targetRect.top}px`;
+            targetSlot.style.width = `${targetRect.width}px`;
+            targetSlot.style.height = `${targetRect.height}px`;
+            targetSlot.style.setProperty(
+              "--process-color",
+              targetNode.style.getPropertyValue("--process-color") || "#4f6bed",
+            );
+            document.body.appendChild(targetSlot);
+            targetSlots.push(targetSlot);
           }
 
-          const deltaX = targetCenter.x - sourceCenter.x;
-          const deltaY = targetCenter.y - sourceCenter.y;
           const fadesIn = move.from.place === "future" || move.from.place === "finished";
           const fadesOut = move.to.place === "future" || move.to.place === "finished";
-          const animation = traveler.animate([
-            { opacity: fadesIn ? .08 : 1, transform: "translate(0, 0)" },
-            {
-              opacity: fadesOut ? .08 : 1,
-              transform: `translate(${deltaX}px, ${deltaY}px)`,
-            },
-          ], {
-            delay: guideLead + (phase.action === "boost" ? 0 : Math.min(moveIndex, 4) * 35),
+          const routePosition = routeByProcess.get(move.processId) ?? { lane: 0, order: moveIndex };
+          const route = travelRoute(
+            sourceRect,
+            targetRect,
+            routePosition.lane,
+            batchRouting.normal,
+            root.getBoundingClientRect(),
+            routeInputs.length,
+            fadesIn,
+            fadesOut,
+          );
+          traveler.dataset.motionOrder = `${routePosition.order + 1}/${routeInputs.length}`;
+          traveler.dataset.motionBatch = routeInputs.length > 1 ? "true" : "false";
+          traveler.dataset.motionLane = route.lane.toFixed(2);
+          traveler.style.setProperty("--motion-z-index", String(10000 + routeInputs.length - routePosition.order));
+          const animation = traveler.animate(route.keyframes, {
+            delay: guideLead + routePosition.order * (
+              trafficStagger || (phase.action === "boost" ? 0 : 35)
+            ),
             duration: Math.max(260, moveDuration),
             fill: "both",
             easing: "cubic-bezier(.2,.75,.2,1)",
@@ -515,9 +691,14 @@ export function useTypedProcessMotion(
         if (signal.aborted) return;
         guide?.remove();
         travelers.forEach((traveler) => traveler.remove());
+        targetSlots.forEach((targetSlot) => targetSlot.remove());
+        document.querySelectorAll(".process-motion-bystander")
+          .forEach((element) => element.classList.remove("process-motion-bystander"));
         document.querySelectorAll<HTMLElement>("[data-motion-hidden]").forEach((element) => {
           element.style.visibility = "";
           element.removeAttribute("data-motion-hidden");
+          element.removeAttribute("data-motion-target-for");
+          element.classList.remove("process-motion-target");
           element.classList.remove("process-just-landed");
           void element.offsetWidth;
           element.classList.add("process-just-landed");

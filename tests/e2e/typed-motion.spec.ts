@@ -50,6 +50,55 @@ async function expectPhase(page: Page, action: string, index: number, count: num
   return observation;
 }
 
+async function armTravelerOverlapSampler(page: Page, key: string, action: string) {
+  await page.evaluate(({ sampleKey, expectedAction }) => {
+    type Sample = { maximum: number; samples: number; done: boolean };
+    const scope = window as Window & { __schedulingOverlapSamples?: Record<string, Sample> };
+    const samples = scope.__schedulingOverlapSamples ?? {};
+    const result: Sample = { maximum: 0, samples: 0, done: false };
+    samples[sampleKey] = result;
+    scope.__schedulingOverlapSamples = samples;
+    let seen = false;
+    const ratio = (left: DOMRect, right: DOMRect) => {
+      const width = Math.max(0, Math.min(left.right, right.right) - Math.max(left.left, right.left));
+      const height = Math.max(0, Math.min(left.bottom, right.bottom) - Math.max(left.top, right.top));
+      return width * height / Math.min(left.width * left.height, right.width * right.height);
+    };
+    const sample = () => {
+      const phase = document.querySelector(".dashboard-grid")?.getAttribute("data-motion-phase");
+      if (phase === expectedAction) {
+        seen = true;
+        const rectangles = [...document.querySelectorAll<HTMLElement>(
+          `.process-motion-traveler[data-motion-action="${expectedAction}"]`,
+        )].map((traveler) => traveler.getBoundingClientRect());
+        for (let left = 0; left < rectangles.length; left += 1) {
+          for (let right = left + 1; right < rectangles.length; right += 1) {
+            result.maximum = Math.max(result.maximum, ratio(rectangles[left], rectangles[right]));
+          }
+        }
+        result.samples += 1;
+      } else if (seen) {
+        result.done = true;
+        return;
+      }
+      requestAnimationFrame(sample);
+    };
+    requestAnimationFrame(sample);
+  }, { sampleKey: key, expectedAction: action });
+}
+
+async function readTravelerOverlapSample(page: Page, key: string) {
+  const handle = await page.waitForFunction((sampleKey) => {
+    type Sample = { maximum: number; samples: number; done: boolean };
+    const scope = window as Window & { __schedulingOverlapSamples?: Record<string, Sample> };
+    const sample = scope.__schedulingOverlapSamples?.[sampleKey];
+    return sample?.done ? sample : null;
+  }, key);
+  const sample = await handle.jsonValue() as { maximum: number; samples: number; done: boolean };
+  await handle.dispose();
+  return sample;
+}
+
 test.beforeEach(async ({ page }) => {
   await page.goto("/");
   await expect(page.getByRole("heading", { name: "Scheduling Studio" })).toBeVisible();
@@ -198,6 +247,7 @@ test("simultaneous arrivals use separate staging lanes and preserve queue order"
   ]);
   await page.locator("#algorithm").selectOption("fcfs");
   await page.locator('[data-timeline-time="1"]').click();
+  await armTravelerOverlapSampler(page, "simultaneous-arrivals", "arrive");
   await page.getByRole("button", { name: "Next time step" }).click();
 
   await expectPhase(page, "arrive", 0, 1);
@@ -214,9 +264,100 @@ test("simultaneous arrivals use separate staging lanes and preserve queue order"
       expect(overlapWidth * overlapHeight).toBe(0);
     }
   }
+  const movingOverlap = await readTravelerOverlapSample(page, "simultaneous-arrivals");
+  expect(movingOverlap.samples).toBeGreaterThan(10);
+  expect(movingOverlap.maximum).toBeLessThan(.05);
   await expect(page.locator(".dashboard-grid")).toHaveAttribute("data-motion-status", "idle");
   await expect(page.getByTestId("ready-queue-0")).toHaveAttribute("data-ready-ids", "B,C,D");
   await expect(page.getByTestId("cpu-process-card")).toHaveAttribute("data-process-id", "A");
+});
+
+test("multi-process boosts use distinct curved lanes and readable stacking", async ({ page }) => {
+  await importScenario(page, [
+    { id: "A", arrivalTime: 0, serviceTime: 3 },
+    { id: "B", arrivalTime: 0, serviceTime: 3 },
+    { id: "C", arrivalTime: 0, serviceTime: 2 },
+  ]);
+  await page.locator("#algorithm").selectOption("mlfq");
+  await page.getByRole("spinbutton", { name: "Q0" }).fill("1");
+  await page.getByRole("spinbutton", { name: "Q1" }).fill("1");
+  await page.getByRole("spinbutton", { name: "Q2" }).fill("4");
+  await page.getByRole("spinbutton", { name: "Boost ticks" }).fill("5");
+  await page.locator(".speed-control select").selectOption("2000");
+  await page.locator('[data-timeline-time="4"]').click();
+  await armTravelerOverlapSampler(page, "friendly-boost", "boost");
+  await page.getByRole("button", { name: "Next time step" }).click();
+
+  await expectPhase(page, "demote", 0, 3);
+  await expectPhase(page, "boost", 1, 3);
+  const boostTravelers = page.locator('.process-motion-traveler[data-motion-action="boost"]');
+  await expect(boostTravelers).toHaveCount(3);
+  await expect(page.locator(".process-motion-target[data-motion-hidden]" )).toHaveCount(3);
+  await expect(page.locator(".process-motion-target-slot")).toHaveText(["C", "A", "B"]);
+
+  const routePresentation = await boostTravelers.evaluateAll((travelers) => travelers.map((traveler) => {
+    const animation = traveler.getAnimations()[0];
+    const keyframes = animation
+      ? (animation.effect as KeyframeEffect).getKeyframes()
+      : [];
+    const style = getComputedStyle(traveler);
+    return {
+      id: (traveler as HTMLElement).dataset.processId,
+      lane: (traveler as HTMLElement).dataset.motionLane,
+      order: (traveler as HTMLElement).dataset.motionOrder,
+      zIndex: style.zIndex,
+      boxShadow: style.boxShadow,
+      transforms: keyframes.map((frame) => String(frame.transform ?? "")),
+    };
+  }));
+  expect(new Set(routePresentation.map((route) => route.lane)).size).toBe(3);
+  expect(new Set(routePresentation.map((route) => route.zIndex)).size).toBe(3);
+  expect(routePresentation.map((route) => route.order)).toEqual(["1/3", "2/3", "3/3"]);
+  expect(routePresentation.every((route) => route.boxShadow !== "none")).toBe(true);
+  expect(routePresentation.every((route) => route.transforms.length === 3)).toBe(true);
+  expect(routePresentation.every((route) => route.transforms.every((transform) => !transform.includes("scale")))).toBe(true);
+
+  const overlap = await readTravelerOverlapSample(page, "friendly-boost");
+  expect(overlap.samples).toBeGreaterThan(10);
+  expect(overlap.maximum).toBeLessThan(.1);
+
+  await expect(page.locator(".dashboard-grid")).toHaveAttribute("data-motion-status", "idle");
+  await expect(page.locator(".process-motion-target, .process-motion-traveler")).toHaveCount(0);
+  await expect(page.getByTestId("cpu-process-card")).toHaveAttribute("data-process-id", "C");
+  await expect(page.getByTestId("ready-queue-0")).toHaveAttribute("data-ready-ids", "A,B");
+});
+
+test("mixed-level boost traffic never lets one moving card mask another", async ({ page }) => {
+  await importScenario(page, [
+    { id: "A", arrivalTime: 2, serviceTime: 9 },
+    { id: "B", arrivalTime: 2, serviceTime: 4 },
+    { id: "C", arrivalTime: 0, serviceTime: 9 },
+    { id: "D", arrivalTime: 2, serviceTime: 6 },
+  ]);
+  await page.locator("#algorithm").selectOption("mlfq");
+  await page.getByRole("spinbutton", { name: "Q0" }).fill("1");
+  await page.getByRole("spinbutton", { name: "Q1" }).fill("3");
+  await page.getByRole("spinbutton", { name: "Q2" }).fill("5");
+  await page.getByRole("spinbutton", { name: "Boost ticks" }).fill("7");
+  await page.locator(".speed-control select").selectOption("2000");
+  await page.locator('[data-timeline-time="6"]').click();
+  await armTravelerOverlapSampler(page, "mixed-level-boost", "boost");
+  await page.getByRole("button", { name: "Next time step" }).click();
+
+  await expectPhase(page, "demote", 0, 3);
+  await expectPhase(page, "boost", 1, 3);
+  const travelers = page.locator('.process-motion-traveler[data-motion-action="boost"]');
+  await expect(travelers).toHaveCount(4);
+  await expect(page.locator(".process-motion-target-slot")).toHaveCount(4);
+
+  const overlap = await readTravelerOverlapSample(page, "mixed-level-boost");
+  expect(overlap.samples).toBeGreaterThan(20);
+  expect(overlap.maximum).toBeLessThan(.18);
+
+  await expect(page.locator(".dashboard-grid")).toHaveAttribute("data-motion-status", "idle");
+  await expect(page.locator(".process-motion-target-slot, .process-motion-traveler")).toHaveCount(0);
+  await expect(page.getByTestId("cpu-process-card")).toHaveAttribute("data-process-id", "A");
+  await expect(page.getByTestId("ready-queue-0")).toHaveAttribute("data-ready-ids", "B,D,C");
 });
 
 test("RR and STCF expose their policy-specific same-boundary phase order", async ({ page }) => {
