@@ -99,6 +99,90 @@ async function readTravelerOverlapSample(page: Page, key: string) {
   return sample;
 }
 
+async function armTravelerToProcessSampler(page: Page, key: string) {
+  await page.evaluate((sampleKey) => {
+    type Sample = {
+      maximum: number;
+      samples: number;
+      done: boolean;
+      worst: { action: string; moving: string; other: string } | null;
+    };
+    const scope = window as Window & { __schedulingProcessSamples?: Record<string, Sample> };
+    const result: Sample = { maximum: 0, samples: 0, done: false, worst: null };
+    scope.__schedulingProcessSamples = scope.__schedulingProcessSamples ?? {};
+    scope.__schedulingProcessSamples[sampleKey] = result;
+    let seen = false;
+    const ratio = (left: DOMRect, right: DOMRect) => {
+      const width = Math.max(0, Math.min(left.right, right.right) - Math.max(left.left, right.left));
+      const height = Math.max(0, Math.min(left.bottom, right.bottom) - Math.max(left.top, right.top));
+      return width * height / Math.min(left.width * left.height, right.width * right.height);
+    };
+    const sample = () => {
+      const dashboard = document.querySelector<HTMLElement>(".dashboard-grid");
+      if (dashboard?.dataset.motionStatus === "playing") {
+        seen = true;
+        const travelers = [...document.querySelectorAll<HTMLElement>(".process-motion-traveler")]
+          .map((node) => ({
+            node,
+            id: node.dataset.processId ?? "",
+            action: node.dataset.motionAction ?? "",
+            moving: true,
+          }));
+        const stationary = [...document.querySelectorAll<HTMLElement>("[data-motion-id]:not([data-motion-hidden])")]
+          .map((node) => ({
+            node,
+            id: node.dataset.motionId ?? "",
+            action: dashboard.dataset.motionPhase ?? "",
+            moving: false,
+          }));
+        const cards = [...travelers, ...stationary];
+        for (let left = 0; left < cards.length; left += 1) {
+          for (let right = left + 1; right < cards.length; right += 1) {
+            const first = cards[left];
+            const second = cards[right];
+            if ((!first.moving && !second.moving) || first.id === second.id) continue;
+            const overlap = ratio(first.node.getBoundingClientRect(), second.node.getBoundingClientRect());
+            if (overlap > result.maximum) {
+              const mover = first.moving ? first : second;
+              const other = first.moving ? second : first;
+              result.maximum = overlap;
+              result.worst = { action: mover.action, moving: mover.id, other: other.id };
+            }
+          }
+        }
+        result.samples += 1;
+      } else if (seen) {
+        result.done = true;
+        return;
+      }
+      requestAnimationFrame(sample);
+    };
+    requestAnimationFrame(sample);
+  }, key);
+}
+
+async function readTravelerToProcessSample(page: Page, key: string) {
+  const handle = await page.waitForFunction((sampleKey) => {
+    type Sample = {
+      maximum: number;
+      samples: number;
+      done: boolean;
+      worst: { action: string; moving: string; other: string } | null;
+    };
+    const scope = window as Window & { __schedulingProcessSamples?: Record<string, Sample> };
+    const sample = scope.__schedulingProcessSamples?.[sampleKey];
+    return sample?.done ? sample : null;
+  }, key);
+  const sample = await handle.jsonValue() as {
+    maximum: number;
+    samples: number;
+    done: boolean;
+    worst: { action: string; moving: string; other: string } | null;
+  };
+  await handle.dispose();
+  return sample;
+}
+
 test.beforeEach(async ({ page }) => {
   await page.goto("/");
   await expect(page.getByRole("heading", { name: "Scheduling Studio" })).toBeVisible();
@@ -127,6 +211,10 @@ test("compound MLFQ boundaries expose every authoritative forward and reverse ph
   expect(demote.cpu).toBe("");
   expect(demote.queues).toEqual(["X", "A", ""]);
   expect(demote.travelers.find((traveler) => traveler.id === "A")).toMatchObject({ from: "cpu", to: "q1" });
+  await expect(page.locator('.process-motion-traveler[data-process-id="A"]'))
+    .toHaveAttribute("data-motion-route", "standard");
+  await expect(page.locator('.process-motion-arrow[data-motion-action="demote"]'))
+    .toHaveAttribute("data-motion-route", "standard");
 
   const boost = await expectPhase(page, "boost", 1, 4);
   expect(boost.queues).toEqual(["X,A", "", ""]);
@@ -140,6 +228,10 @@ test("compound MLFQ boundaries expose every authoritative forward and reverse ph
   expect(dispatch.cpu).toBe("X");
   expect(dispatch.queues).toEqual(["A,B", "", ""]);
   expect(dispatch.travelers.find((traveler) => traveler.id === "X")?.to).toBe("cpu");
+  await expect(page.locator('.process-motion-traveler[data-process-id="X"]'))
+    .toHaveAttribute("data-motion-route", "standard");
+  await expect(page.locator('.process-motion-arrow[data-motion-action="dispatch"]'))
+    .toHaveAttribute("data-motion-route", "standard");
   const overlapSample = await page.evaluate(async () => {
     const overlapRatio = (left: DOMRect, right: DOMRect) => {
       const width = Math.max(0, Math.min(left.right, right.right) - Math.max(left.left, right.left));
@@ -236,6 +328,73 @@ test("a redispatched card visibly reaches the real queue before returning to the
   await expect(page.getByTestId("cpu-process-card")).toHaveAttribute("data-process-id", "A");
   expect(rotationGeometry.width).toBeGreaterThan(80);
   expect(rotationGeometry.height).toBeGreaterThan(40);
+});
+
+test("default Round Robin routes rotating and dispatched cards around the ready queue", async ({ page }) => {
+  await page.locator("#algorithm").selectOption("rr");
+  await page.getByRole("spinbutton", { name: "Time quantum" }).fill("2");
+  await page.locator(".speed-control select").selectOption("850");
+
+  for (const sourceTime of [3, 8]) {
+    await page.locator(`[data-timeline-time="${sourceTime}"]`).click();
+    const key = `default-rr-${sourceTime + 1}`;
+    await armTravelerToProcessSampler(page, key);
+    await page.getByRole("button", { name: "Next time step" }).click();
+
+    const phaseCount = sourceTime === 3 ? 3 : 2;
+    const rotateIndex = sourceTime === 3 ? 1 : 0;
+    if (sourceTime === 3) await expectPhase(page, "arrive", 0, phaseCount);
+    await expectPhase(page, "rotate", rotateIndex, phaseCount);
+    await expect(page.locator('.process-motion-traveler[data-motion-action="rotate"]'))
+      .toHaveAttribute("data-motion-route", "ready-corridor");
+    await expect(page.locator('.process-motion-arrow[data-motion-action="rotate"]'))
+      .toHaveAttribute("data-motion-route", "ready-corridor");
+
+    await expectPhase(page, "dispatch", rotateIndex + 1, phaseCount);
+    await expect(page.locator('.process-motion-traveler[data-motion-action="dispatch"]'))
+      .toHaveAttribute("data-motion-route", "ready-corridor");
+    await expect(page.locator('.process-motion-arrow[data-motion-action="dispatch"]'))
+      .toHaveAttribute("data-motion-route", "ready-corridor");
+
+    const sample = await readTravelerToProcessSample(page, key);
+    expect(sample.samples).toBeGreaterThan(20);
+    expect(sample.maximum, JSON.stringify(sample.worst)).toBeLessThan(.001);
+    await expect(page.locator(".dashboard-grid")).toHaveAttribute("data-motion-status", "idle");
+    await expect(page.getByTestId("cpu-process-card")).toHaveAttribute(
+      "data-process-id",
+      sourceTime === 3 ? "A" : "D",
+    );
+    await expect(page.getByTestId("ready-queue-0")).toHaveAttribute(
+      "data-ready-ids",
+      sourceTime === 3 ? "C,B" : "C,E,B",
+    );
+
+    const reverseKey = `${key}-reverse`;
+    await armTravelerToProcessSampler(page, reverseKey);
+    await page.getByRole("button", { name: "Previous time step" }).click();
+
+    await expectPhase(page, "dispatch", 0, phaseCount);
+    await expect(page.locator('.process-motion-traveler[data-motion-action="dispatch"]'))
+      .toHaveAttribute("data-motion-route", "ready-corridor");
+    await expect(page.locator('.process-motion-arrow[data-motion-action="dispatch"]'))
+      .toHaveAttribute("data-motion-route", "ready-corridor");
+
+    await expectPhase(page, "rotate", 1, phaseCount);
+    await expect(page.locator('.process-motion-traveler[data-motion-action="rotate"]'))
+      .toHaveAttribute("data-motion-route", "ready-corridor");
+    await expect(page.locator('.process-motion-arrow[data-motion-action="rotate"]'))
+      .toHaveAttribute("data-motion-route", "ready-corridor");
+
+    const reverseSample = await readTravelerToProcessSample(page, reverseKey);
+    expect(reverseSample.samples).toBeGreaterThan(20);
+    expect(reverseSample.maximum, JSON.stringify(reverseSample.worst)).toBeLessThan(.001);
+    await expect(page.locator(".dashboard-grid")).toHaveAttribute("data-motion-status", "idle");
+    await expect(page.getByTestId("cpu-process-card")).toHaveAttribute("data-process-id", "B");
+    await expect(page.getByTestId("ready-queue-0")).toHaveAttribute(
+      "data-ready-ids",
+      sourceTime === 3 ? "A" : "D,C,E",
+    );
+  }
 });
 
 test("simultaneous arrivals use separate staging lanes and preserve queue order", async ({ page }) => {

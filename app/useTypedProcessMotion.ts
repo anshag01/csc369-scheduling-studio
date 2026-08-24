@@ -25,6 +25,11 @@ type PhasePlan = {
 type TravelRoute = {
   keyframes: Keyframe[];
   lane: number;
+  kind: "standard" | "ready-corridor";
+  guide?: {
+    source: { x: number; y: number };
+    target: { x: number; y: number };
+  };
 };
 
 const actionLabel: Record<TransitionAction, string> = {
@@ -98,9 +103,15 @@ function clamp(value: number, minimum: number, maximum: number) {
   return Math.min(maximum, Math.max(minimum, value));
 }
 
+function isSingleReadyPlace(place: string) {
+  return place === "ready";
+}
+
 function travelRoute(
   sourceRect: DOMRect,
   targetRect: DOMRect,
+  fromPlace: string,
+  toPlace: string,
   lane: number,
   normal: { x: number; y: number },
   bounds: DOMRect,
@@ -112,6 +123,52 @@ function travelRoute(
   const targetCenter = center(targetRect);
   const deltaX = targetCenter.x - sourceCenter.x;
   const deltaY = targetCenter.y - sourceCenter.y;
+
+  // CPU/queue transfers use an L-shaped air corridor. A return moves across
+  // the open CPU row before dropping into its queue slot; dispatch performs
+  // the exact reverse. This keeps the card away from intervening ready jobs.
+  if (fromPlace === "cpu" && isSingleReadyPlace(toPlace)) {
+    const horizontal = Math.abs(deltaX);
+    const vertical = Math.abs(deltaY);
+    if (horizontal >= 2 && vertical >= 2) {
+      const corner = { x: targetCenter.x, y: sourceCenter.y };
+      return {
+        lane: 0,
+        kind: "ready-corridor",
+        guide: { source: corner, target: targetCenter },
+        keyframes: [
+          { opacity: 1, transform: "translate(0, 0)", offset: 0 },
+          {
+            opacity: 1,
+            transform: `translate(${deltaX}px, 0)`,
+            offset: horizontal / (horizontal + vertical),
+          },
+          { opacity: 1, transform: `translate(${deltaX}px, ${deltaY}px)`, offset: 1 },
+        ],
+      };
+    }
+  }
+  if (isSingleReadyPlace(fromPlace) && toPlace === "cpu") {
+    const horizontal = Math.abs(deltaX);
+    const vertical = Math.abs(deltaY);
+    if (horizontal >= 2 && vertical >= 2) {
+      const corner = { x: sourceCenter.x, y: targetCenter.y };
+      return {
+        lane: 0,
+        kind: "ready-corridor",
+        guide: { source: corner, target: targetCenter },
+        keyframes: [
+          { opacity: 1, transform: "translate(0, 0)", offset: 0 },
+          {
+            opacity: 1,
+            transform: `translate(0, ${deltaY}px)`,
+            offset: vertical / (horizontal + vertical),
+          },
+          { opacity: 1, transform: `translate(${deltaX}px, ${deltaY}px)`, offset: 1 },
+        ],
+      };
+    }
+  }
 
   // A phase remains one atomic scheduling event, but concurrent cards fan out
   // through stable visual lanes so one process never fully masks another.
@@ -131,6 +188,7 @@ function travelRoute(
 
   return {
     lane,
+    kind: "standard",
     keyframes: [
       { opacity: fadesIn ? .08 : 1, transform: "translate(0, 0)", offset: 0 },
       {
@@ -205,8 +263,16 @@ function addGuide(
   phaseCount: number,
   sources: Map<string, MotionPoint>,
   targets: Map<string, DOMRect>,
+  routeGuides: Map<string, NonNullable<TravelRoute["guide"]>>,
 ) {
   const routes = phase.moves.flatMap((move) => {
+    const override = routeGuides.get(move.processId);
+    if (override) {
+      return Math.hypot(
+        override.target.x - override.source.x,
+        override.target.y - override.source.y,
+      ) >= 16 ? [override] : [];
+    }
     const source = sources.get(move.processId)?.rect;
     const target = targets.get(move.processId);
     if (!source || !target) return [];
@@ -240,6 +306,7 @@ function addGuide(
   guide.dataset.motionAction = phase.action;
   guide.dataset.motionPhaseIndex = String(phaseIndex);
   guide.dataset.motionProcessId = phase.moves.map((move) => move.processId).join(",");
+  guide.dataset.motionRoute = routeGuides.size > 0 ? "ready-corridor" : "standard";
   guide.style.left = `${start.x}px`;
   guide.style.top = `${start.y}px`;
   guide.style.width = `${length}px`;
@@ -476,6 +543,7 @@ export function useTypedProcessMotion(
         flushSync(() => setVisualState(visualState(phase.after)));
 
         const targets = new Map<string, DOMRect>();
+        const routeGuides = new Map<string, NonNullable<TravelRoute["guide"]>>();
         const travelers: HTMLElement[] = [];
         const targetSlots: HTMLElement[] = [];
         const animations: Animation[] = [];
@@ -506,15 +574,26 @@ export function useTypedProcessMotion(
             const leavesQueue = phase.moves.some((move) =>
               /^(ready|q\d+)$/.test(move.from.place) && !/^(ready|q\d+)$/.test(move.to.place),
             );
+            const entersQueue = phase.moves.some((move) =>
+              !/^(ready|q\d+)$/.test(move.from.place) && /^(ready|q\d+)$/.test(move.to.place),
+            );
             // A follower must retain a departing card's source slot until that
             // card has cleared it. Insertions do the opposite: existing cards
-            // shift early so the incoming card's destination is open.
+            // make room during the guide lead, before the traveler starts.
             const holdOffset = leavesQueue ? .72 : .22;
-            const animation = node.animate([
-              { transform: `translate(${deltaX}px, ${deltaY}px)`, offset: 0 },
-              { transform: `translate(${deltaX}px, ${deltaY}px)`, offset: holdOffset },
-              { transform: "translate(0, 0)", offset: 1 },
-            ], {
+            const clearanceOffset = Math.max(.08, (guideLead - 24) / phaseDuration);
+            const keyframes = entersQueue
+              ? [
+                { transform: `translate(${deltaX}px, ${deltaY}px)`, offset: 0 },
+                { transform: "translate(0, 0)", offset: clearanceOffset },
+                { transform: "translate(0, 0)", offset: 1 },
+              ]
+              : [
+                { transform: `translate(${deltaX}px, ${deltaY}px)`, offset: 0 },
+                { transform: `translate(${deltaX}px, ${deltaY}px)`, offset: holdOffset },
+                { transform: "translate(0, 0)", offset: 1 },
+              ];
+            const animation = node.animate(keyframes, {
               duration: phaseDuration,
               fill: "both",
               easing: "cubic-bezier(.2,.75,.2,1)",
@@ -643,6 +722,8 @@ export function useTypedProcessMotion(
           const route = travelRoute(
             sourceRect,
             targetRect,
+            move.from.place,
+            move.to.place,
             routePosition.lane,
             batchRouting.normal,
             root.getBoundingClientRect(),
@@ -653,6 +734,8 @@ export function useTypedProcessMotion(
           traveler.dataset.motionOrder = `${routePosition.order + 1}/${routeInputs.length}`;
           traveler.dataset.motionBatch = routeInputs.length > 1 ? "true" : "false";
           traveler.dataset.motionLane = route.lane.toFixed(2);
+          traveler.dataset.motionRoute = route.kind;
+          if (route.guide) routeGuides.set(move.processId, route.guide);
           traveler.style.setProperty("--motion-z-index", String(10000 + routeInputs.length - routePosition.order));
           const animation = traveler.animate(route.keyframes, {
             delay: guideLead + routePosition.order * (
@@ -666,7 +749,9 @@ export function useTypedProcessMotion(
           animations.push(animation);
         }
 
-        const guide = reducedMotion ? null : addGuide(phase, phaseIndex, phases.length, sources, targets);
+        const guide = reducedMotion
+          ? null
+          : addGuide(phase, phaseIndex, phases.length, sources, targets, routeGuides);
         root.dataset.motionPhase = phase.action;
         root.dataset.motionPhaseIndex = String(phaseIndex);
         root.dataset.motionPhaseState = "moving";
