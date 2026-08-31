@@ -1,6 +1,6 @@
 # CSC369 Scheduling Studio
 
-[![Scheduler verification](https://github.com/anshag01/csc369-scheduling-studio/actions/workflows/scheduler-verification.yml/badge.svg)](https://github.com/anshag01/csc369-scheduling-studio/actions/workflows/scheduler-verification.yml)
+[Live Demo](https://csc369-scheduling-studio.vercel.app/) · [![Scheduler verification](https://github.com/anshag01/csc369-scheduling-studio/actions/workflows/scheduler-verification.yml/badge.svg)](https://github.com/anshag01/csc369-scheduling-studio/actions/workflows/scheduler-verification.yml)
 
 An interactive, single-CPU scheduling visualizer based on the CSC369 scheduling lecture and instructor discussion.
 
