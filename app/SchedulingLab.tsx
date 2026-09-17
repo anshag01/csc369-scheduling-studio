@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Algorithm, ProcessDefinition, SchedulerVisualState, simulate, validateProcesses } from "../lib/simulator";
+import { Algorithm, ProcessDefinition, SchedulerVisualState, simulate, validateProcesses, validateSimulationConfig } from "../lib/simulator";
 import { useTypedProcessMotion } from "./useTypedProcessMotion";
 
 const palette = ["#4f6bed", "#8e63ce", "#d18b38", "#d15f5f", "#328ea8", "#667085"];
@@ -92,7 +92,14 @@ export default function SchedulingLab({
   const stepRef = useRef(step);
   const dashboardRef = useRef<HTMLDivElement>(null);
 
-  const validationError = validateProcesses(processes);
+  let validationError = validateProcesses(processes);
+  if (!validationError) {
+    try {
+      validateSimulationConfig({ algorithm, quantum, mlfqQuanta, mlfqBoostInterval });
+    } catch (error) {
+      validationError = error instanceof Error ? error.message : "Check the scheduling settings.";
+    }
+  }
   const result = useMemo(
     () => validationError ? { snapshots: [], timeline: [] } : simulate(processes, { algorithm, quantum, mlfqQuanta, mlfqBoostInterval }),
     [algorithm, mlfqBoostInterval, mlfqQuanta, processes, quantum, validationError],
@@ -319,7 +326,7 @@ export default function SchedulingLab({
                 <div className="completion-dock" data-testid="completion-dock" data-motion-finish-target data-completed-count={completedCount} aria-label={`${completedCount} completed process${completedCount === 1 ? "" : "es"}`}><i aria-hidden="true">✓</i><span><small>COMPLETED</small><strong>{completedCount}</strong></span></div>
                 <div className="cpu-progress"><span style={{ width: runningProcess ? `${((runningProcess.serviceTime - (displayState?.runningRemaining ?? 0)) / runningProcess.serviceTime) * 100}%` : "0%", background: runningProcess?.color }} /></div>
               </article>
-              <article className="event-card"><div className="card-label">AT THIS TIME BOUNDARY</div><div className="event-list" data-testid="event-list" data-event-count={snapshot.events.length}>{snapshot.events.length ? snapshot.events.map((event, index) => <p key={index}><span>{index + 1}</span>{event}</p>) : <p className="muted-event">No scheduling decision was needed.</p>}</div></article>
+              <article className="event-card"><div className="card-label">AT THIS TIME BOUNDARY · t={snapshot.time}</div><div className="event-list" data-testid="event-list" data-event-count={snapshot.events.length}>{snapshot.events.length ? snapshot.events.map((event, index) => <p key={index}><span>{index + 1}</span>{event}</p>) : <p className="muted-event">No scheduling decision was needed.</p>}</div></article>
             </div>
 
             <section className="queue-section card-surface"><div className="card-title-row"><div><p className="eyebrow">READY STATE</p><h2>{algorithm === "mlfq" ? "Priority feedback map" : "Ready queue"}</h2></div><div className="queue-summary"><span data-testid="state-counts" data-new-count={futureCount} data-ready-count={waitingCount} data-finished-count={completedCount}><b data-motion-future-target>{futureCount} future</b> · {waitingCount} waiting</span>{algorithm === "mlfq" && <div className="boost-countdown" title={`Waiting processes return to Q0 in ${boostTicksRemaining} ticks`}><i className="boost-ring" style={{ "--boost-progress": `${boostProgress}%` } as React.CSSProperties}><b>{boostTicksRemaining}</b></i><span><strong>NEXT BOOST</strong><small>ticks remaining</small></span></div>}</div></div>

@@ -133,12 +133,53 @@ function chooseNext(
   return queue.shift() ?? null;
 }
 
-function describeAlgorithm(algorithm: Algorithm) {
-  if (algorithm === "fcfs") return "the process at the head of the FIFO queue";
-  if (algorithm === "sjf") return "the ready process with the shortest service time";
-  if (algorithm === "stcf") return "the ready process with the shortest remaining time";
-  if (algorithm === "rr") return "the process at the head of the Round Robin queue";
-  return "the first process in the highest-priority non-empty queue";
+function bestRemaining(queue: RuntimeProcess[]) {
+  return queue.reduce<RuntimeProcess | null>((best, process) =>
+    !best || process.remainingTime < best.remainingTime ||
+    (process.remainingTime === best.remainingTime && byStableOrder(process, best) < 0)
+      ? process : best, null);
+}
+
+function explainSelection(process: RuntimeProcess, queues: RuntimeProcess[][], config: SimulationConfig) {
+  if (config.algorithm === "mlfq") {
+    const lowerReady = queues.some((queue, level) => level > process.queueLevel && queue.length > 0);
+    return `${process.id} was selected: it is first in Q${process.queueLevel}, the highest-priority non-empty queue.${lowerReady ? " Lower-priority queues must wait." : ""}`;
+  }
+  if (config.algorithm === "fcfs") {
+    return `${process.id} was selected: first in FIFO order, with arrival at t=${process.arrivalTime}. It runs until completion.`;
+  }
+  if (config.algorithm === "rr") {
+    return `${process.id} was selected: first in the Round Robin queue, with a fresh ${config.quantum}-tick quantum.`;
+  }
+  const score = (job: RuntimeProcess) => config.algorithm === "sjf" ? job.serviceTime : job.remainingTime;
+  const tied = queues[0].filter((job) => score(job) === score(process));
+  const tieReason = tied.length > 1
+    ? tied.some((job) => job.arrivalTime !== process.arrivalTime)
+      ? " Equal lengths are resolved by earlier arrival, then input order."
+      : " Equal lengths and arrival times are resolved by input order."
+    : "";
+  return `${process.id} was selected: shortest ${config.algorithm === "sjf" ? "service" : "remaining"} time among ready processes (${score(process)} ticks).${tieReason}`;
+}
+
+function explainContinuation(process: RuntimeProcess, queues: RuntimeProcess[][], config: SimulationConfig) {
+  if (config.algorithm === "fcfs" || config.algorithm === "sjf") {
+    return `${process.id} continues with ${process.remainingTime} ticks left: ${config.algorithm.toUpperCase()} is non-preemptive, so ready processes must wait for it to finish.`;
+  }
+  if (config.algorithm === "rr") {
+    return `${process.id} continues: ${process.quantumUsed}/${config.quantum} quantum ticks used; ${config.quantum - process.quantumUsed} remain in this turn.`;
+  }
+  if (config.algorithm === "mlfq") {
+    const reason = process.boostProtected
+      ? "the boost preserves its current CPU turn"
+      : "no higher-priority queue is ready";
+    return `${process.id} continues in Q${process.queueLevel}: ${reason} (${process.quantumUsed}/${config.mlfqQuanta[process.queueLevel]} allotment ticks used).`;
+  }
+  const contender = bestRemaining(queues[0]);
+  if (!contender) return `${process.id} continues with ${process.remainingTime} ticks left; no other process is ready.`;
+  if (contender.remainingTime === process.remainingTime) {
+    return `${process.id} continues: it and ${contender.id} each have ${process.remainingTime} ticks left. STCF keeps the current process on an equal-time tie.`;
+  }
+  return `${process.id} continues: ${process.remainingTime} ticks left, less than the shortest ready alternative, ${contender.id} (${contender.remainingTime} ticks).`;
 }
 
 function makeViews(
@@ -219,6 +260,7 @@ export function simulate(
     const transitions: TransitionPhase[] = [];
     let expired: RuntimeProcess | null = null;
     let yielded: RuntimeProcess | null = null;
+    let dispatched = false;
 
     // Expired/yielded work is logically pending requeue, but it remains
     // visually on the CPU until the explicit rotate/yield/demote phase. This
@@ -309,6 +351,7 @@ export function simulate(
       if (!expired) return;
       const process = expired;
       process.boostProtected = false;
+      const used = process.quantumUsed;
       process.quantumUsed = 0;
       if (config.algorithm === "mlfq") {
         const previousLevel = process.queueLevel;
@@ -325,8 +368,8 @@ export function simulate(
         }]);
         events.push(
           previousLevel === process.queueLevel
-            ? `${process.id} used its full allotment and returned to Q${process.queueLevel}.`
-            : `${process.id} used its full allotment and moved from Q${previousLevel} to Q${process.queueLevel}.`,
+            ? `${process.id} used its full allotment and returned to Q${process.queueLevel}. ${used}/${config.mlfqQuanta[previousLevel]} ticks used; it stays at the lowest priority with a fresh allotment.`
+            : `${process.id} used its full allotment and moved from Q${previousLevel} to Q${process.queueLevel}. ${used}/${config.mlfqQuanta[previousLevel]} ticks used; ${process.remainingTime} service ticks remain.`,
         );
       } else {
         queues[0].push(process);
@@ -336,7 +379,7 @@ export function simulate(
           from: { place: "cpu" },
           to: { place: "ready", index: queues[0].length - 1 },
         }]);
-        events.push(`${process.id}'s quantum expired; it moved to the back of the ready queue.`);
+        events.push(`${process.id}'s quantum expired; it moved to the back of the ready queue. ${used}/${config.quantum} ticks used; ${process.remainingTime} service ticks remain.${processes.some((job) => job.arrivalTime === time) ? " Same-time arrivals enter before the expired process." : ""}`);
       }
     };
 
@@ -395,20 +438,18 @@ export function simulate(
         from: { place: "future" },
         to: { place: queuePlace(0), index: queues[0].length - 1 },
       }]);
-      events.push(`${process.id} arrived and joined ${queueCount > 1 ? "Q0" : "the ready queue"}.`);
+      events.push(`${process.id} arrived and joined ${config.algorithm === "mlfq" ? "Q0" : "the ready queue"}.`);
     }
 
     enqueueYielded();
     enqueueExpired();
 
     if (running && config.algorithm === "stcf" && queues[0].length > 0) {
-      const contender = queues[0].reduce((best, process) =>
-        process.remainingTime < best.remainingTime ? process : best,
-      );
+      const contender = bestRemaining(queues[0])!;
       if (contender.remainingTime < running.remainingTime) {
         const preempted = running;
         events.push(
-          `${contender.id} has less remaining time, so ${preempted.id} was preempted.`,
+          `${contender.id} has less remaining time, so ${preempted.id} was preempted. ${contender.remainingTime} < ${preempted.remainingTime} ticks remaining.`,
         );
         preempted.quantumUsed = 0;
         queues[0].push(preempted);
@@ -427,7 +468,8 @@ export function simulate(
       );
       if (higherQueueReady) {
         const preempted = running;
-        events.push(`${preempted.id} was preempted by a process in a higher-priority queue.`);
+        const higherLevel = queues.findIndex((queue, level) => level < preempted.queueLevel && queue.length > 0);
+        events.push(`${preempted.id} was preempted by a process in a higher-priority queue. ${queues[higherLevel][0].id} is ready in Q${higherLevel}; ${preempted.id} returns to the head of Q${preempted.queueLevel}, keeping ${preempted.quantumUsed}/${config.mlfqQuanta[preempted.queueLevel]} used ticks.`);
         preempted.boostProtected = false;
         queues[preempted.queueLevel].unshift(preempted);
         running = null;
@@ -460,15 +502,20 @@ export function simulate(
           from: { place: queuePlace(sourceLevel), index: sourceIndex },
           to: { place: "cpu" },
         }]);
-        events.push(`${running.id} was selected as ${describeAlgorithm(config.algorithm)}.`);
+        dispatched = true;
+        events.push(explainSelection(running, queuesBeforeDispatch, config));
       }
     }
 
     const allFinished = processes.every((process) => process.completionTime !== null);
     const futureArrival = processes.some((process) => process.arrivalTime > time);
 
-    if (!running && events.length === 0 && futureArrival) {
-      events.push("The CPU is idle while the scheduler waits for the next arrival.");
+    if (running && !dispatched) events.push(explainContinuation(running, queues, config));
+    if (allFinished) {
+      events.push(`All ${processes.length} processes have finished; the simulation is complete.`);
+    } else if (!running && futureArrival) {
+      const nextArrival = Math.min(...processes.filter((process) => process.arrivalTime > time).map((process) => process.arrivalTime));
+      events.push(`The CPU is idle while the scheduler waits for the next arrival. No process is ready; next arrival at t=${nextArrival}.`);
     }
 
     snapshots.push({
@@ -522,11 +569,15 @@ export function validateProcesses(processes: ProcessDefinition[]): string | null
 }
 
 export function validateSimulationConfig(config: SimulationConfig): void {
+  if (!["fcfs", "sjf", "stcf", "rr", "mlfq"].includes(config.algorithm)) {
+    throw new RangeError("Choose a supported scheduling algorithm.");
+  }
   if (config.algorithm === "rr" && (!Number.isSafeInteger(config.quantum) || config.quantum < 1)) {
     throw new RangeError("The Round Robin quantum must be a positive whole number.");
   }
   if (config.algorithm !== "mlfq") return;
   if (
+    !Array.isArray(config.mlfqQuanta) ||
     config.mlfqQuanta.length === 0 ||
     config.mlfqQuanta.some((quantum) => !Number.isSafeInteger(quantum) || quantum < 1)
   ) {

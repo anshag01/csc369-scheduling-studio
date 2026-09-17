@@ -163,3 +163,16 @@ describe("scheduling visualization mirrors simulator snapshots", () => {
     expect(html).not.toContain("dashboard-grid");
   });
 });
+
+it("renders a validation message instead of crashing for invalid scheduling settings", () => {
+  for (const props of [
+    { initialAlgorithm: "rr" as const, initialQuantum: Number.MAX_VALUE },
+    { initialAlgorithm: "mlfq" as const, initialMlfqQuanta: [0, 4] },
+    { initialAlgorithm: "mlfq" as const, initialMlfqBoostInterval: Number.POSITIVE_INFINITY },
+  ]) {
+    const html = renderToStaticMarkup(<SchedulingLab {...props} />);
+    expect(html).toContain("Check the scenario");
+    expect(html).not.toContain('class="dashboard-grid');
+    expect(html).toContain('role="alert"');
+  }
+});

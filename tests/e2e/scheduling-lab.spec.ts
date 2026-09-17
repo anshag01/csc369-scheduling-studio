@@ -430,6 +430,20 @@ test("invalid edits never leave stale visualization data on screen", async ({ pa
   await expect(page.getByTestId("time-value")).toHaveText("0");
 });
 
+test("invalid quantum settings show an error and recover after correction", async ({ page }) => {
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  await page.locator("#algorithm").selectOption("rr");
+  await page.getByRole("spinbutton", { name: "Time quantum" }).fill("9007199254740992");
+  await expect(page.locator(".validation-message")).toContainText("positive whole number");
+  await expect(page.locator(".dashboard-grid")).toHaveCount(0);
+  await page.getByRole("spinbutton", { name: "Time quantum" }).fill("2");
+  await expect(page.locator(".dashboard-grid")).toBeVisible();
+  await page.getByRole("button", { name: "Next time step" }).click();
+  await expect(page.getByTestId("time-value")).toHaveText("1");
+  expect(errors).toEqual([]);
+});
+
 test("large imported scenarios keep all MLFQ queues, events, metrics, and ticks accessible", async ({ page }) => {
   const processes = Array.from({ length: 12 }, (_, index) => ({
     id: `P${index}`,

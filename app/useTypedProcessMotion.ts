@@ -634,9 +634,18 @@ export function useTypedProcessMotion(
         const trafficStagger = mixedRouteKinds
           ? Math.min(520, Math.max(300, moveDuration * .46))
           : 0;
+        // Keep cards leaving the same queue synchronized: delaying them individually
+        // lets a trailing curve cross a card that has already landed.
+        const routeGroups = [...new Set(routeInputs.map((route) => `${route.fromPlace}->${route.toPlace}`))];
         const routeByProcess = new Map(routeInputs.map((route, routeIndex) => [
           route.processId,
-          { lane: batchRouting.lanes[routeIndex], order: routeIndex },
+          {
+            lane: batchRouting.lanes[routeIndex],
+            order: routeIndex,
+            launchOrder: phase.action === "boost"
+              ? routeGroups.indexOf(`${route.fromPlace}->${route.toPlace}`)
+              : routeIndex,
+          },
         ]));
 
         for (const [moveIndex, move] of phase.moves.entries()) {
@@ -718,7 +727,7 @@ export function useTypedProcessMotion(
 
           const fadesIn = move.from.place === "future" || move.from.place === "finished";
           const fadesOut = move.to.place === "future" || move.to.place === "finished";
-          const routePosition = routeByProcess.get(move.processId) ?? { lane: 0, order: moveIndex };
+          const routePosition = routeByProcess.get(move.processId) ?? { lane: 0, order: moveIndex, launchOrder: moveIndex };
           const route = travelRoute(
             sourceRect,
             targetRect,
@@ -738,7 +747,7 @@ export function useTypedProcessMotion(
           if (route.guide) routeGuides.set(move.processId, route.guide);
           traveler.style.setProperty("--motion-z-index", String(10000 + routeInputs.length - routePosition.order));
           const animation = traveler.animate(route.keyframes, {
-            delay: guideLead + routePosition.order * (
+            delay: guideLead + routePosition.launchOrder * (
               trafficStagger || (phase.action === "boost" ? 0 : 35)
             ),
             duration: Math.max(260, moveDuration),

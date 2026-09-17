@@ -39,7 +39,7 @@ describe("scheduling simulator", () => {
       { algorithm: "mlfq", quantum: 2, mlfqQuanta: [2, 4, 8], mlfqBoostInterval: 100 },
     );
     expect(result.timeline.map((slice) => slice.processId).join("")).toBe("AABAA");
-    expect(result.snapshots[2].events).toContain("A used its full allotment and moved from Q0 to Q1.");
+    expect(result.snapshots[2].events.join("\n")).toContain("A used its full allotment and moved from Q0 to Q1.");
   });
 
   it("accounts for CPU use across voluntary early relinquishes", () => {
@@ -50,10 +50,10 @@ describe("scheduling simulator", () => {
     );
 
     expect(result.timeline.slice(0, 8).map((slice) => slice.processId).join("")).toBe("AAABBBBA");
-    expect(result.snapshots[3].events).toContain(
+    expect(result.snapshots[3].events.join("\n")).toContain(
       "A gave up the CPU one tick early at Q0; 3/4 used ticks remain accounted.",
     );
-    expect(result.snapshots[8].events).toContain("A used its full allotment and moved from Q0 to Q1.");
+    expect(result.snapshots[8].events.join("\n")).toContain("A used its full allotment and moved from Q0 to Q1.");
   });
 
   it("periodically boosts every active MLFQ process to Q0", () => {
@@ -84,7 +84,7 @@ describe("scheduling simulator", () => {
     );
 
     expect(result.timeline.slice(0, 4).map((slice) => slice.processId).join("")).toBe("AAAB");
-    expect(result.snapshots[3].events).toContain(
+    expect(result.snapshots[3].events.join("\n")).toContain(
       "A was preempted by a process in a higher-priority queue.",
     );
     expect(result.snapshots[3].processes.find((item) => item.id === "A")?.allotmentUsed).toBe(1);

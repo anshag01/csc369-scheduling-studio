@@ -40,7 +40,7 @@ describe("explicit MLFQ policy regressions", () => {
     );
 
     expect(result.timeline.slice(0, 4).map((slice) => slice.processId).join("")).toBe("AAAB");
-    expect(result.snapshots[3].events).toContain(
+    expect(result.snapshots[3].events.join("\n")).toContain(
       "A was preempted by a process in a higher-priority queue.",
     );
     expect(result.snapshots[3].readyQueues[1][0]).toBe("A");
@@ -62,7 +62,7 @@ describe("explicit MLFQ policy regressions", () => {
     );
 
     expect(result.snapshots[3].processes.find((item) => item.id === "A")?.allotmentUsed).toBe(1);
-    expect(result.snapshots[7].events).toContain(
+    expect(result.snapshots[7].events.join("\n")).toContain(
       "A used its full allotment and moved from Q1 to Q2.",
     );
   });
@@ -73,11 +73,11 @@ describe("explicit MLFQ policy regressions", () => {
       config([4, 8]),
     );
 
-    expect(result.snapshots[3].events).toContain(
+    expect(result.snapshots[3].events.join("\n")).toContain(
       "A gave up the CPU one tick early at Q0; 3/4 used ticks remain accounted.",
     );
     expect(result.snapshots[3].processes.find((item) => item.id === "A")?.allotmentUsed).toBe(3);
-    expect(result.snapshots[8].events).toContain(
+    expect(result.snapshots[8].events.join("\n")).toContain(
       "A used its full allotment and moved from Q0 to Q1.",
     );
   });

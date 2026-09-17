@@ -480,7 +480,7 @@ describe("comprehensive scheduling verification", () => {
     );
     const demotions = result.snapshots.flatMap((snapshot) => snapshot.events).filter((event) => event.includes("A used its full allotment"));
     expect(demotions).toHaveLength(2);
-    expect(result.snapshots.flatMap((snapshot) => snapshot.events)).toContain(
+    expect(result.snapshots.flatMap((snapshot) => snapshot.events).join("\n")).toContain(
       "A was preempted by a process in a higher-priority queue.",
     );
   });

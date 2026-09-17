@@ -65,9 +65,9 @@ describe("scheduler edge cases and failure containment", () => {
       mlfqBoostInterval: 100,
     }));
     expect(mlfq.timeline.map((slice) => slice.processId).join("")).toBe("AAAA");
-    expect(mlfq.snapshots[1].events).toContain("A used its full allotment and moved from Q0 to Q1.");
-    expect(mlfq.snapshots[2].events).toContain("A used its full allotment and moved from Q1 to Q2.");
-    expect(mlfq.snapshots[3].events).toContain("A used its full allotment and returned to Q2.");
+    expect(mlfq.snapshots[1].events.join("\n")).toContain("A used its full allotment and moved from Q0 to Q1.");
+    expect(mlfq.snapshots[2].events.join("\n")).toContain("A used its full allotment and moved from Q1 to Q2.");
+    expect(mlfq.snapshots[3].events.join("\n")).toContain("A used its full allotment and returned to Q2.");
   });
 
   it("preserves original input order for every simultaneous stable tie", () => {
@@ -87,7 +87,7 @@ describe("scheduler edge cases and failure containment", () => {
     const strictlyShorter = [process("A", 0, 5), process("B", 2, 2)];
     expect(trace("stcf", strictlyShorter)).toBe("AABBAAA");
     const boundary = simulate(strictlyShorter, config("stcf")).snapshots[2];
-    expect(boundary.events).toContain("B has less remaining time, so A was preempted.");
+    expect(boundary.events.join("\n")).toContain("B has less remaining time, so A was preempted.");
     expect(boundary.running).toBe("B");
     expect(boundary.readyQueues[0]).toEqual(["A"]);
   });
@@ -100,8 +100,8 @@ describe("scheduler edge cases and failure containment", () => {
     expect(result.timeline.map((slice) => slice.processId).join("")).toBe("ABA");
     expect(result.snapshots[1].events).toEqual([
       "B arrived and joined the ready queue.",
-      "A's quantum expired; it moved to the back of the ready queue.",
-      "B was selected as the process at the head of the Round Robin queue.",
+      "A's quantum expired; it moved to the back of the ready queue. 1/1 ticks used; 1 service ticks remain. Same-time arrivals enter before the expired process.",
+      "B was selected: first in the Round Robin queue, with a fresh 1-tick quantum.",
     ]);
   });
 
@@ -126,7 +126,7 @@ describe("scheduler edge cases and failure containment", () => {
       expect(result.timeline.map((slice) => slice.processId ?? "-").join("")).toBe("-----AA");
       for (let time = 0; time < 5; time += 1) {
         expect(result.snapshots[time].running).toBeNull();
-        expect(result.snapshots[time].events).toContain("The CPU is idle while the scheduler waits for the next arrival.");
+        expect(result.snapshots[time].events.join("\n")).toContain("The CPU is idle while the scheduler waits for the next arrival.");
       }
       expect(result.snapshots[5].running).toBe("A");
     }
@@ -140,7 +140,7 @@ describe("scheduler edge cases and failure containment", () => {
     expect(result.snapshots[1].running).toBe("A");
     expect(result.snapshots[1].events.some((event) => event.includes("preempted"))).toBe(false);
     expect(result.snapshots[4].running).toBe("C");
-    expect(result.snapshots[4].events).toContain("A was preempted by a process in a higher-priority queue.");
+    expect(result.snapshots[4].events.join("\n")).toContain("A was preempted by a process in a higher-priority queue.");
     expect(result.snapshots[4].processes.find((item) => item.id === "A")?.allotmentUsed).toBe(1);
   });
 
@@ -173,10 +173,10 @@ describe("scheduler edge cases and failure containment", () => {
     expect(result.timeline.slice(2, 5).map((slice) => slice.processId).join("")).toBe("BBA");
     expect(result.snapshots[3].running).toBe("B");
     expect(result.snapshots[3].processes.find((item) => item.id === "B")?.allotmentUsed).toBe(1);
-    expect(result.snapshots[3].events).toContain(
+    expect(result.snapshots[3].events.join("\n")).toContain(
       "Priority boost moved 1 waiting process to Q0; B remained on the CPU in Q0 with 1/2 ticks used.",
     );
-    expect(result.snapshots[4].events).toContain(
+    expect(result.snapshots[4].events.join("\n")).toContain(
       "B used its full allotment and moved from Q0 to Q1.",
     );
     expect(result.snapshots[4].running).toBe("A");
@@ -196,10 +196,10 @@ describe("scheduler edge cases and failure containment", () => {
       state: "running",
     });
     expect(result.snapshots[4].readyQueues[0]).toEqual(["B"]);
-    expect(result.snapshots[4].events).toContain(
+    expect(result.snapshots[4].events.join("\n")).toContain(
       "Priority boost moved 1 waiting process to Q0; A remained on the CPU in Q1 with 2/4 ticks used.",
     );
-    expect(result.snapshots[6].events).toContain(
+    expect(result.snapshots[6].events.join("\n")).toContain(
       "A used its full allotment and moved from Q1 to Q2.",
     );
   });
@@ -227,7 +227,7 @@ describe("scheduler edge cases and failure containment", () => {
     );
     const boundary = result.snapshots[2];
 
-    expect(boundary.events[0]).toBe("B used its full allotment and moved from Q0 to Q1.");
+    expect(boundary.events[0]).toBe("B used its full allotment and moved from Q0 to Q1. 1/1 ticks used; 4 service ticks remain.");
     expect(boundary.events[1]).toBe("Priority boost moved 2 waiting processes to Q0.");
     expect(boundary.running).toBe("A");
     expect(boundary.readyQueues[0]).toEqual(["B"]);
