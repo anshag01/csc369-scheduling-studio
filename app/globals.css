@@ -241,7 +241,7 @@ footer { display: flex; justify-content: space-between; gap: 16px; padding: 13px
   .panel-section { padding: 13px 17px; }
   .section-heading { margin-bottom: 10px; }
   .section-heading h2 { font-size: 13px; }
-  .field-label { margin-bottom: 5px; font-size: 10px; }
+  .field-label { margin-bottom: 5px; font-size: 11px; }
   select { padding-top: 8px; padding-bottom: 8px; }
   .inline-setting { margin-top: 8px; padding-top: 8px; }
   .number-with-unit input, .number-with-unit span { padding-top: 6px; padding-bottom: 6px; }
@@ -250,7 +250,7 @@ footer { display: flex; justify-content: space-between; gap: 16px; padding: 13px
   .policy-note { margin-top: 9px; padding: 8px 10px 8px 13px; }
   .policy-note > span { margin-bottom: 2px; }
   .policy-note strong { font-size: 10px; line-height: 1.3; }
-  .policy-note p { margin-top: 2px; font-size: 9px; line-height: 1.3; }
+  .policy-note p { margin-top: 2px; font-size: 10px; line-height: 1.3; }
   .process-table-head { padding-bottom: 4px; }
   .process-inputs { gap: 4px; }
   .process-row input { padding: 5px 7px; font-size: 11px; }
@@ -288,15 +288,15 @@ footer { display: flex; justify-content: space-between; gap: 16px; padding: 13px
   .boost-ring { width: 24px; height: 24px; }
   .boost-ring::after { inset: 3px; }
   .boost-ring b { font-size: 7px; }
-  .boost-countdown strong, .boost-countdown small { font-size: 6px; }
+  .boost-countdown strong, .boost-countdown small { font-size: 7px; }
   .running-content, .idle-content { max-width: calc(100% - 126px); gap: 11px; margin-top: 9px; }
   .cpu-process-copy h2 { font-size: 14px; }
-  .cpu-process-copy small { margin-top: 2px; font-size: 7px; }
+  .cpu-process-copy small { margin-top: 2px; font-size: 8px; }
   .completion-dock { min-width: 116px; height: 36px; gap: 6px; padding: 3px 8px; }
   .cpu-card > .completion-dock { right: 12px; }
   .completion-dock > i { width: 20px; height: 20px; font-size: 10px; }
   .completion-dock > span { min-width: 48px; gap: 5px; }
-  .completion-dock small { font-size: 6px; }
+  .completion-dock small { font-size: 7px; }
   .completion-dock strong { font-size: 13px; }
   .process-orb { width: 48px; height: 48px; border-width: 3px; font-size: 16px; }
   .running-content h2, .idle-content h2 { margin-bottom: 1px; font-size: 16px; }
@@ -305,7 +305,7 @@ footer { display: flex; justify-content: space-between; gap: 16px; padding: 13px
   .event-list { gap: 4px; margin-top: 8px; }
   .event-card { display: flex; flex-direction: column; overflow: hidden; }
   .event-card .event-list { min-height: 0; flex: 1; padding-right: 3px; overflow-y: auto; }
-  .event-list p { gap: 6px; font-size: 10px; line-height: 1.25; }
+  .event-list p { gap: 6px; font-size: 11px; line-height: 1.25; }
   .event-list p > span { width: 15px; height: 15px; font-size: 7px; }
   .queue-row { grid-template-columns: 88px minmax(0, 1fr); gap: 7px; }
   .queue-label { padding: 4px 7px; }
@@ -322,14 +322,14 @@ footer { display: flex; justify-content: space-between; gap: 16px; padding: 13px
   .allotment-meter { height: 2px; margin-top: 2px; }
   .timeline-scroll { padding: 2px 0 8px; }
   .timeline-grid { padding-top: 13px; }
-  .tick-label { top: -13px; }
+  .tick-label { top: -13px; font-size: 9px; }
   .tick-block { height: 28px; font-size: 9px; }
   .timeline-legend { gap: 9px; padding-top: 7px; }
   .metrics-section .card-title-row { margin-bottom: 6px; }
   .metric-summary { gap: 3px; }
   .metric-summary > span { min-width: 35px; padding: 2px 4px; }
-  .metric-summary small { font-size: 5px; }
-  .metric-summary strong { font-size: 8px; }
+  .metric-summary small { font-size: 7px; }
+  .metric-summary strong { font-size: 10px; }
   .metrics-scroll { height: calc(100% - 33px); overflow: auto; }
   .metrics-scroll table { height: 100%; }
   th { padding: 5px 7px; font-size: 7px; }
