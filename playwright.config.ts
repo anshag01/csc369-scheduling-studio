@@ -10,6 +10,7 @@ export default defineConfig({
   workers: process.env.CI ? 1 : undefined,
   reporter: process.env.CI ? [["line"], ["html", { open: "never" }]] : "list",
   use: {
+    launchOptions: { executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH },
     baseURL: "http://localhost:4173",
     trace: "retain-on-failure",
     screenshot: "only-on-failure",

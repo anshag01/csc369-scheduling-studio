@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Algorithm, ProcessDefinition, SchedulerVisualState, simulate, validateProcesses } from "../lib/simulator";
+import { Pagination, pageIndex } from "./Pagination";
 import { useTypedProcessMotion } from "./useTypedProcessMotion";
 
 const palette = ["#4f6bed", "#8e63ce", "#d18b38", "#d15f5f", "#328ea8", "#667085"];
@@ -83,6 +84,28 @@ export default function SchedulingLab({
   const [playing, setPlaying] = useState(false);
   const [speed, setSpeed] = useState(1400);
   const [showMetrics, setShowMetrics] = useState(initialShowMetrics);
+  const [viewport, setViewport] = useState({ width: 1366, height: 768 });
+  const [setupSection, setSetupSection] = useState("policy");
+  const [view, setView] = useState("overview");
+  const [processPage, setProcessPage] = useState(0);
+  const [metricsMode, setMetricsMode] = useState("state");
+  const [metricsPage, setMetricsPage] = useState(0);
+  const [queuePages, setQueuePages] = useState<Record<number, number>>({});
+  const [queueLevelPage, setQueueLevelPage] = useState(0);
+  const [eventPage, setEventPage] = useState(0);
+  const [timelineWindow, setTimelineWindow] = useState<{ step: number; page: number } | null>(null);
+  useEffect(() => {
+    const resize = () => setViewport({ width: window.innerWidth, height: window.innerHeight });
+    resize();
+    window.addEventListener("resize", resize);
+    return () => window.removeEventListener("resize", resize);
+  }, []);
+  const compact = viewport.width < 1100 || viewport.height < 720;
+  const processPageSize = compact && viewport.height < 700 ? 3 : 5;
+  const currentProcessPage = pageIndex(processPage, processes.length, processPageSize);
+  const metricsPageSize = compact && viewport.height < 600 ? 3 : 5;
+  const queueLevelPageSize = viewport.height < 560 ? 2 : 3;
+  const currentMetricsPage = pageIndex(metricsPage, processes.length, metricsPageSize);
   const [jsonText, setJsonText] = useState("");
   const [jsonMessage, setJsonMessage] = useState("");
   const [motionCue, setMotionCue] = useState<string | null>(null);
@@ -100,6 +123,15 @@ export default function SchedulingLab({
   const lastStep = Math.max(0, result.snapshots.length - 1);
   const snapshot = result.snapshots[Math.min(step, lastStep)];
   const displayState = motionVisualState ?? snapshot;
+  const panelWidth = compact ? viewport.width - 32 : viewport.width - 340;
+  const queueWidth = showMetrics && !compact ? (panelWidth - 12) * .55 : panelWidth;
+  const queuePageSize = Math.max(1, Math.floor((queueWidth - (algorithm === "mlfq" ? 160 : 64)) / 102));
+  const timelinePageSize = Math.max(4, Math.min(24, Math.floor((panelWidth - 60) / Math.max(38, Math.max(4, ...processes.map((process) => process.id.length)) * 8 + 12))));
+  const timelinePage = pageIndex(timelineWindow?.step === step ? timelineWindow.page : Math.floor(Math.min(step, Math.max(0, result.timeline.length - 1)) / timelinePageSize), result.timeline.length, timelinePageSize);
+  const timelineStart = timelinePage * timelinePageSize;
+  const visibleTimeline = result.timeline.slice(timelineStart, timelineStart + timelinePageSize);
+  const visibleEventPage = pageIndex(eventPage, snapshot?.events.length ?? 0, 2);
+  const levelPage = pageIndex(queueLevelPage, displayState?.readyQueues.length ?? 0, queueLevelPageSize);
   const processById = useMemo(() => new Map(processes.map((process) => [process.id, process])), [processes]);
 
   useEffect(() => {
@@ -131,6 +163,7 @@ export default function SchedulingLab({
     }
     stepRef.current = nextStep;
     setStep(nextStep);
+    setEventPage(0);
     return true;
   }, [lastStep, result.snapshots, updateMotionBusy]);
 
@@ -166,6 +199,10 @@ export default function SchedulingLab({
     setMotionBusy(false);
     setMotionVisualState(null);
     setStep(0);
+    setEventPage(0);
+    setQueuePages({});
+    setQueueLevelPage(0);
+    setTimelineWindow(null);
     setPlaying(false);
   };
   const updateProcess = (index: number, patch: Partial<ProcessDefinition>) => {
@@ -176,6 +213,7 @@ export default function SchedulingLab({
     resetPlayback();
     const used = new Set(processes.map((process) => process.id));
     const id = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("").find((candidate) => !used.has(candidate)) ?? `P${processes.length + 1}`;
+    setProcessPage(Math.floor(processes.length / processPageSize));
     setProcesses((current) => [...current, {
       id,
       arrivalTime: Math.max(0, ...current.map((process) => process.arrivalTime)) + 1,
@@ -196,7 +234,7 @@ export default function SchedulingLab({
       }));
       const error = validateProcesses(next);
       if (error) throw new Error(error);
-      resetPlayback(); setProcesses(next); setJsonMessage(`Loaded ${next.length} processes.`);
+      resetPlayback(); setProcessPage(0); setMetricsPage(0); setProcesses(next); document.querySelector<HTMLDetailsElement>(".json-panel")?.removeAttribute("open"); setJsonMessage(`Loaded ${next.length} processes.`);
     } catch (error) { setJsonMessage(error instanceof Error ? error.message : "Could not read this scenario."); }
   };
 
@@ -236,9 +274,11 @@ export default function SchedulingLab({
   );
 
   return (
-    <main className="app-shell" aria-label="Scheduling Studio">
+    <main className="app-shell" aria-label="Scheduling Studio" data-view={view}>
+      <nav className="view-tabs" aria-label="Dashboard sections">{[["setup", "Setup"], ["overview", "CPU"], ["queues", "Queues"], ["timeline", "Timeline"], ["metrics", "Metrics"]].map(([id, label]) => <button key={id} disabled={motionBusy} aria-pressed={view === id} onClick={() => { setView(id); if (id === "metrics") setShowMetrics(true); }}>{label}</button>)}</nav>
       <div className="workspace">
-        <aside className="setup-panel" inert={motionBusy ? true : undefined}>
+        <aside className="setup-panel" data-section={setupSection} inert={motionBusy ? true : undefined}>
+          <nav className="setup-tabs" aria-label="Setup sections"><button aria-pressed={setupSection === "policy"} onClick={() => setSetupSection("policy")}>Policy</button><button aria-pressed={setupSection === "processes"} onClick={() => setSetupSection("processes")}>Processes</button></nav>
           <section className="panel-section">
             <div className="section-heading">
               <div><span className="step-number">01</span><h2>Choose a policy</h2></div>
@@ -264,15 +304,16 @@ export default function SchedulingLab({
           <section className="panel-section process-section">
             <div className="section-heading"><div><span className="step-number">02</span><h2>Define processes</h2></div><button className="text-button" onClick={loadExample}>Load example</button></div>
             <div className="process-table-head"><span>Process</span><span>Arrival</span><span>Service</span><span /></div>
-            <div className="process-inputs">{processes.map((process, index) => <div className="process-row" key={`${index}-${process.color}`}>
+            <div className="process-inputs">{processes.slice(currentProcessPage * processPageSize, (currentProcessPage + 1) * processPageSize).map((process, rowIndex) => { const index = currentProcessPage * processPageSize + rowIndex; return <div className="process-row" key={`${index}-${process.color}`}>
               <label className="process-id-input"><span style={{ background: process.color }} /><input aria-label={`Process ${index + 1} ID`} maxLength={6} value={process.id} onChange={(event) => updateProcess(index, { id: event.target.value.toUpperCase() })} /></label>
               <input aria-label={`${process.id} arrival time`} type="number" min="0" value={process.arrivalTime} onChange={(event) => updateProcess(index, { arrivalTime: wholeNumber(event.target.value, 0) })} />
               <input aria-label={`${process.id} service time`} type="number" min="1" value={process.serviceTime} onChange={(event) => updateProcess(index, { serviceTime: wholeNumber(event.target.value, 1) })} />
               <button aria-label={`Remove ${process.id}`} className="remove-button" onClick={() => { resetPlayback(); setProcesses((current) => current.filter((_, processIndex) => processIndex !== index)); }}>×</button>
-            </div>)}</div>
+            </div>; })}</div>
+            <Pagination label="processes" page={currentProcessPage} pages={Math.ceil(processes.length / processPageSize)} onChange={setProcessPage} />
             <button className="add-button" onClick={addProcess}><span>＋</span>Add process</button>
             {validationError && <p className="validation-message" role="alert">{validationError}</p>}
-            <details className="json-panel"><summary>Import or export JSON</summary><textarea aria-label="Scenario JSON" value={jsonText} onChange={(event) => setJsonText(event.target.value)} placeholder={'{"processes": [...]}' } /><div className="json-actions"><button onClick={prepareJson}>Export</button><button onClick={importJson}>Import</button></div>{jsonMessage && <p>{jsonMessage}</p>}</details>
+            <details className="json-panel"><summary>Import or export JSON</summary><textarea aria-label="Scenario JSON" value={jsonText} onChange={(event) => setJsonText(event.target.value)} placeholder={'{"processes": [...]}' } /><div className="json-actions"><button onClick={prepareJson}>Export</button><button onClick={importJson}>Import</button></div></details>{jsonMessage && <p className="json-message" role="status">{jsonMessage}</p>}
           </section>
         </aside>
 
@@ -319,25 +360,29 @@ export default function SchedulingLab({
                 <div className="completion-dock" data-testid="completion-dock" data-motion-finish-target data-completed-count={completedCount} aria-label={`${completedCount} completed process${completedCount === 1 ? "" : "es"}`}><i aria-hidden="true">✓</i><span><small>COMPLETED</small><strong>{completedCount}</strong></span></div>
                 <div className="cpu-progress"><span style={{ width: runningProcess ? `${((runningProcess.serviceTime - (displayState?.runningRemaining ?? 0)) / runningProcess.serviceTime) * 100}%` : "0%", background: runningProcess?.color }} /></div>
               </article>
-              <article className="event-card"><div className="card-label">AT THIS TIME BOUNDARY</div><div className="event-list" data-testid="event-list" data-event-count={snapshot.events.length}>{snapshot.events.length ? snapshot.events.map((event, index) => <p key={index}><span>{index + 1}</span>{event}</p>) : <p className="muted-event">No scheduling decision was needed.</p>}</div></article>
+              <article className="event-card"><div className="card-label">AT THIS TIME BOUNDARY</div><div className="event-list" data-testid="event-list" data-event-count={snapshot.events.length}>{snapshot.events.length ? snapshot.events.slice(visibleEventPage * 2, visibleEventPage * 2 + 2).map((event, index) => <p key={index}><span>{visibleEventPage * 2 + index + 1}</span>{event}</p>) : <p className="muted-event">No scheduling decision was needed.</p>}</div><Pagination label="events" page={visibleEventPage} pages={Math.ceil(snapshot.events.length / 2)} onChange={setEventPage} disabled={motionBusy} /></article>
             </div>
 
             <section className="queue-section card-surface"><div className="card-title-row"><div><p className="eyebrow">READY STATE</p><h2>{algorithm === "mlfq" ? "Priority feedback map" : "Ready queue"}</h2></div><div className="queue-summary"><span data-testid="state-counts" data-new-count={futureCount} data-ready-count={waitingCount} data-finished-count={completedCount}><b data-motion-future-target>{futureCount} future</b> · {waitingCount} waiting</span>{algorithm === "mlfq" && <div className="boost-countdown" title={`Waiting processes return to Q0 in ${boostTicksRemaining} ticks`}><i className="boost-ring" style={{ "--boost-progress": `${boostProgress}%` } as React.CSSProperties}><b>{boostTicksRemaining}</b></i><span><strong>NEXT BOOST</strong><small>ticks remaining</small></span></div>}</div></div>
-              <div className={algorithm === "mlfq" ? "multi-queues" : "single-queue"}>{displayState?.readyQueues.map((queue, queueIndex) => {
+              <div className={algorithm === "mlfq" ? "multi-queues" : "single-queue"}>{displayState?.readyQueues.slice(levelPage * queueLevelPageSize, levelPage * queueLevelPageSize + queueLevelPageSize).map((queue, visibleQueueIndex) => {
+                const queueIndex = levelPage * queueLevelPageSize + visibleQueueIndex;
+                const queuePage = pageIndex(queuePages[queueIndex] ?? 0, queue.length, queuePageSize);
                 const allotted = mlfqQuanta[queueIndex];
                 return <div className="queue-row" key={queueIndex}>
                   {algorithm === "mlfq" && <div className="queue-label"><div><strong>Q{queueIndex}</strong></div><span>{queueIndex === 0 ? "Highest" : queueIndex === (displayState?.readyQueues.length ?? 0) - 1 ? "Lowest" : "Medium"} · allotment {mlfqQuanta[queueIndex]}</span>{queueIndex < (displayState?.readyQueues.length ?? 0) - 1 && <i className="demotion-cue">full allotment ↓</i>}</div>}
                   <div className="queue-track" data-testid={`ready-queue-${queueIndex}`} data-ready-ids={queue.join(",")}>
-                    <span className="queue-head">HEAD</span>
-                    {queue.length === 0 ? <span className="empty-queue">Queue empty</span> : queue.map((id) => { const process = processById.get(id)!; const view = displayState?.processes.find((item) => item.id === id); const used = view?.allotmentUsed ?? 0; return <div className={`queue-chip ${algorithm === "mlfq" ? "mlfq-queue-chip" : ""}`} data-process-id={id} data-state="ready" data-remaining={view?.remainingTime} data-allotment-used={algorithm === "mlfq" ? used : undefined} data-motion-id={id} data-motion-place={algorithm === "mlfq" ? `q${queueIndex}` : "ready"} data-motion-color={process.color} key={id} style={{ "--process-color": process.color } as React.CSSProperties} title={algorithm === "mlfq" ? `${id}: ${used} of ${allotted} ticks used at Q${queueIndex}` : undefined}><strong>{id}</strong><span>{view?.remainingTime} left</span>{algorithm === "mlfq" && <small>{used}/{allotted} used</small>}{algorithm === "mlfq" && <i className="allotment-meter" aria-hidden="true"><b style={{ width: `${used / allotted * 100}%` }} /></i>}</div>; })}
-                    <span className="queue-tail">TAIL</span>
+                    <span className="queue-head">{queuePage === 0 ? "HEAD" : `+${queuePage * queuePageSize}`}</span>
+                    {queue.length === 0 ? <span className="empty-queue">Queue empty</span> : queue.slice(queuePage * queuePageSize, (queuePage + 1) * queuePageSize).map((id) => { const process = processById.get(id)!; const view = displayState?.processes.find((item) => item.id === id); const used = view?.allotmentUsed ?? 0; return <div className={`queue-chip ${algorithm === "mlfq" ? "mlfq-queue-chip" : ""}`} data-process-id={id} data-state="ready" data-remaining={view?.remainingTime} data-allotment-used={algorithm === "mlfq" ? used : undefined} data-motion-id={id} data-motion-place={algorithm === "mlfq" ? `q${queueIndex}` : "ready"} data-motion-color={process.color} key={id} style={{ "--process-color": process.color } as React.CSSProperties} title={algorithm === "mlfq" ? `${id}: ${used} of ${allotted} ticks used at Q${queueIndex}` : undefined}><strong>{id}</strong><span>{view?.remainingTime} left</span>{algorithm === "mlfq" && <small>{used}/{allotted} used</small>}{algorithm === "mlfq" && <i className="allotment-meter" aria-hidden="true"><b style={{ width: `${used / allotted * 100}%` }} /></i>}</div>; })}
+                    <span className="queue-tail">{(queuePage + 1) * queuePageSize >= queue.length ? "TAIL" : `+${queue.length - (queuePage + 1) * queuePageSize}`}</span>
                   </div>
+                  <Pagination label={`queue ${queueIndex}`} page={queuePage} pages={Math.ceil(queue.length / queuePageSize)} onChange={(page) => setQueuePages((current) => ({ ...current, [queueIndex]: page }))} disabled={motionBusy} />
                 </div>;
               })}</div>
+              <Pagination label="queue levels" page={levelPage} pages={Math.ceil((displayState?.readyQueues.length ?? 0) / queueLevelPageSize)} onChange={setQueueLevelPage} disabled={motionBusy} />
             </section>
 
             <section className="timeline-section card-surface"><div className="card-title-row"><div><p className="eyebrow">CPU HISTORY</p><h2>Execution timeline</h2></div><span>Click any tick to inspect</span></div>
-              <div className="timeline-scroll"><div className="timeline-grid" style={{ gridTemplateColumns: `repeat(${Math.max(1, result.timeline.length)}, minmax(44px, 1fr))` }}>{result.timeline.map((slice) => {
+              <div className="timeline-scroll"><div className="timeline-grid" style={{ gridTemplateColumns: `repeat(${Math.max(1, visibleTimeline.length)}, minmax(0, 1fr))` }}>{visibleTimeline.map((slice) => {
                 const process = slice.processId ? processById.get(slice.processId) : null;
                 const isBoostBoundary = algorithm === "mlfq" && slice.time > 0 && slice.time % mlfqBoostInterval === 0;
                 return <button
@@ -356,11 +401,12 @@ export default function SchedulingLab({
                   </span>
                   {isBoostBoundary && <span className="boost-marker" aria-hidden="true">BOOST</span>}
                 </button>;
-              })}<span className="timeline-end" style={{ gridColumn: result.timeline.length + 1 }}>{result.timeline.length}</span></div></div>
+              })}<span className="timeline-end" style={{ gridColumn: visibleTimeline.length + 1 }}>{timelineStart + visibleTimeline.length}</span></div></div>
+              <Pagination label="timeline" page={timelinePage} pages={Math.ceil(result.timeline.length / timelinePageSize)} onChange={(page) => setTimelineWindow({ step, page })} disabled={motionBusy} />
               <div className="timeline-legend">{processes.map((process) => <span key={process.id}><i style={{ background: process.color }} />{process.id}</span>)}<span><i className="idle-swatch" />Idle</span></div>
             </section>
 
-            {showMetrics && <section className="metrics-section card-surface"><div className="card-title-row"><div><p className="eyebrow">PROCESS ACCOUNTING</p><h2>State & metrics</h2></div><div className="metric-summary" title={`${completedCount} of ${processes.length} processes complete`}><span><small>AVG W</small><strong>{averageWaiting}</strong></span><span><small>AVG R</small><strong>{averageResponse}</strong></span><span><small>AVG T</small><strong>{averageTurnaround}</strong></span></div></div><div className="metrics-scroll"><table><thead><tr><th>Process</th><th>State</th><th>Remaining</th>{algorithm === "mlfq" && <th>Q used</th>}<th>Waiting</th><th>Response</th><th>Turnaround</th></tr></thead><tbody>{displayState?.processes.map((process) => <tr key={process.id} data-process-id={process.id} data-state={process.state} data-remaining={process.remainingTime} data-queue-level={algorithm === "mlfq" ? process.queueLevel : undefined} data-allotment-used={algorithm === "mlfq" ? process.allotmentUsed : undefined}><td><i style={{ background: process.color }} />{process.id}</td><td><span className={`state-pill ${process.state}`}>{process.state}</span></td><td>{process.remainingTime}</td>{algorithm === "mlfq" && <td>{process.state === "finished" ? "—" : `${process.allotmentUsed}/${mlfqQuanta[process.queueLevel]}`}</td>}<td>{process.waitingTime}</td><td>{process.responseTime ?? "—"}</td><td>{process.turnaroundTime ?? "—"}</td></tr>)}</tbody></table></div></section>}
+            {showMetrics && <section className="metrics-section card-surface" data-metrics-mode={metricsMode}><div className="card-title-row"><div><p className="eyebrow">PROCESS ACCOUNTING</p><h2>State & metrics</h2></div><div className="metric-summary" title={`${completedCount} of ${processes.length} processes complete`}><span><small>AVG W</small><strong>{averageWaiting}</strong></span><span><small>AVG R</small><strong>{averageResponse}</strong></span><span><small>AVG T</small><strong>{averageTurnaround}</strong></span></div></div><nav className="metrics-tabs" aria-label="Metric columns"><button aria-pressed={metricsMode === "state"} onClick={() => setMetricsMode("state")}>Current state</button><button aria-pressed={metricsMode === "timing"} onClick={() => setMetricsMode("timing")}>Timing</button></nav><div className="metrics-scroll"><table><thead><tr><th>Process</th><th className="metric-state">State</th><th className="metric-state" title="Remaining">Left</th>{algorithm === "mlfq" && <th className="metric-state">Q used</th>}<th className="metric-timing">Waiting</th><th className="metric-timing" title="Response time">Resp.</th><th className="metric-timing" title="Turnaround time">Turn.</th></tr></thead><tbody>{displayState?.processes.slice(currentMetricsPage * metricsPageSize, (currentMetricsPage + 1) * metricsPageSize).map((process) => <tr key={process.id} data-process-id={process.id} data-state={process.state} data-remaining={process.remainingTime} data-queue-level={algorithm === "mlfq" ? process.queueLevel : undefined} data-allotment-used={algorithm === "mlfq" ? process.allotmentUsed : undefined}><td><i style={{ background: process.color }} />{process.id}</td><td className="metric-state"><span className={`state-pill ${process.state}`}>{process.state}</span></td><td className="metric-state">{process.remainingTime}</td>{algorithm === "mlfq" && <td className="metric-state">{process.state === "finished" ? "—" : `${process.allotmentUsed}/${mlfqQuanta[process.queueLevel]}`}</td>}<td className="metric-timing">{process.waitingTime}</td><td className="metric-timing">{process.responseTime ?? "—"}</td><td className="metric-timing">{process.turnaroundTime ?? "—"}</td></tr>)}</tbody></table></div><Pagination label="metrics" page={currentMetricsPage} pages={Math.ceil(processes.length / metricsPageSize)} onChange={setMetricsPage} disabled={motionBusy} /></section>}
             </div>
           </>}
         </section>

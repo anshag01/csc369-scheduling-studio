@@ -70,9 +70,6 @@ test("keeps the production source free of starter-preview wiring", async () => {
   assert.match(stylesheet, /\.allotment-meter/);
   assert.match(stylesheet, /\.process-motion-arrow/);
   assert.match(stylesheet, /\.motion-cue/);
-  assert.match(stylesheet, /\.dashboard-grid\.mlfq-dashboard[^}]*225px/);
-  assert.match(stylesheet, /\.event-card \.event-list[^}]*overflow-y: auto/);
-  assert.match(stylesheet, /\.metrics-scroll[^}]*overflow: auto/);
   assert.doesNotMatch(stylesheet, /#10a37f|#19c37d/i);
 
   assert.equal(projectRoot.protocol, "file:");

@@ -227,7 +227,7 @@ function assertScenario(
   const actual = simulate(definitions, config);
   const expected = referenceSimulation(definitions, config);
   const diagnostic = `\nScenario: ${label}\nConfig: ${JSON.stringify(config)}\nProcesses: ${JSON.stringify(definitions.map(({ id, arrivalTime, serviceTime }) => ({ id, arrivalTime, serviceTime })))}`;
-  const check = (condition: unknown, message: string): asserts condition => {
+  const check: (condition: unknown, message: string) => asserts condition = (condition, message) => {
     if (!condition) throw new Error(`${message}${diagnostic}`);
   };
   const same = (left: unknown, right: unknown, message: string) =>
