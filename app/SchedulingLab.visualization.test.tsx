@@ -57,11 +57,9 @@ describe("scheduling visualization mirrors simulator snapshots", () => {
 
         const eventList = firstTag(html, /<div class="event-list"[^>]*>/);
         expect(attribute(eventList, "data-event-count")).toBe(String(snapshot.events.length));
-        for (const event of snapshot.events.slice(0, 2)) {
+        for (const event of snapshot.events) {
           expect(html).toContain(renderToStaticMarkup(<>{event}</>));
         }
-
-        if (snapshot.events.length > 2) expect(html).toContain("Next events page");
 
         const stateCounts = firstTag(html, /<span data-testid="state-counts"[^>]*>/);
         expect(attribute(stateCounts, "data-new-count")).toBe(

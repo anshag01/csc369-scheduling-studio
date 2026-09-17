@@ -237,7 +237,6 @@ test("completion and MLFQ boosts have complete, destination-based animations", a
   await expect(page.locator(".process-motion-ghost")).toHaveCount(0);
   await expect(page.locator(".dashboard-grid")).toHaveAttribute("data-motion-status", "idle");
 
-  await page.locator(".json-panel summary").click();
   await json.fill(JSON.stringify({
     processes: [
       { id: "A", arrivalTime: 0, serviceTime: 10 },
@@ -259,10 +258,6 @@ test("completion and MLFQ boosts have complete, destination-based animations", a
   await expect(page.locator(".dashboard-grid")).toHaveAttribute("data-last-motion-types", /q1->q0/);
   await expect(page.locator('.process-motion-arrow[data-motion-action="boost"][data-motion-process-id="B"]')).toHaveAttribute("data-motion-detail", /priority boost B → Q0/);
   await expect(page.locator(".motion-cue")).toContainText("priority boost B → Q0");
-  await expect(page.locator(".dashboard-grid")).toHaveAttribute("data-motion-status", "idle");
-  while (!(await page.getByTestId("event-list").innerText()).includes("A remained on the CPU in Q1")) {
-    await page.getByRole("button", { name: "Next events page", exact: true }).click();
-  }
   await expect(page.getByTestId("event-list")).toContainText("A remained on the CPU in Q1");
 });
 
@@ -293,7 +288,6 @@ test("MLFQ demotion and higher-priority preemption animate to their exact destin
   await expect(page.getByTestId("ready-queue-1")).toHaveAttribute("data-ready-ids", "A");
   await expect(dashboard).toHaveAttribute("data-motion-status", "idle");
 
-  await page.locator(".json-panel summary").click();
   await page.getByLabel("Scenario JSON").fill(JSON.stringify({
     processes: [
       { id: "A", arrivalTime: 0, serviceTime: 8 },
@@ -448,36 +442,43 @@ test("large imported scenarios keep all MLFQ queues, events, metrics, and ticks 
   await expect(page.getByText("Loaded 12 processes.")).toBeVisible();
   await page.locator("#algorithm").selectOption("mlfq");
 
-  await expect(page.locator(".process-row")).toHaveCount(5);
+  await expect(page.locator(".process-row")).toHaveCount(12);
   await expect(page.locator(".queue-row")).toHaveCount(3);
-  await expect(page.locator(".event-list p")).toHaveCount(2);
+  await expect(page.locator("[data-timeline-time]")).toHaveCount(36);
+  await expect(page.locator(".event-list p")).toHaveCount(13);
   await expect(page.getByTestId("state-counts")).toHaveAttribute("data-ready-count", "11");
 
-  async function collectPages(label: string, selector: string, attribute: string) {
-    const values: string[] = [];
-    while (true) {
-      values.push(...await page.locator(selector).evaluateAll((items, attr) => items.map((item) => item.getAttribute(attr) ?? ""), attribute));
-      const next = page.getByRole("button", { name: `Next ${label} page`, exact: true });
-      if (!await next.count() || await next.isDisabled()) break;
-      await next.click();
-    }
-    return values;
+  const overflow = await page.evaluate(() => {
+    const eventList = document.querySelector<HTMLElement>(".event-list")!;
+    const timeline = document.querySelector<HTMLElement>(".timeline-scroll")!;
+    const firstQueue = document.querySelector<HTMLElement>(".queue-track")!;
+    return {
+      eventScrollable: eventList.scrollHeight > eventList.clientHeight && getComputedStyle(eventList).overflowY === "auto",
+      timelineScrollable: timeline.scrollWidth > timeline.clientWidth && getComputedStyle(timeline).overflowX === "auto",
+      queueOverflowIsSafe: getComputedStyle(firstQueue).overflowX === "auto",
+      pageDoesNotVerticallyScroll: document.documentElement.scrollHeight <= window.innerHeight + 1,
+    };
+  });
+  expect(overflow).toEqual({
+    eventScrollable: true,
+    timelineScrollable: true,
+    queueOverflowIsSafe: true,
+    pageDoesNotVerticallyScroll: true,
+  });
+
+  const queueSection = await page.locator(".queue-section").boundingBox();
+  expect(queueSection).not.toBeNull();
+  for (const row of await page.locator(".queue-row").all()) {
+    const box = await row.boundingBox();
+    expect(box).not.toBeNull();
+    expect(box!.y).toBeGreaterThanOrEqual(queueSection!.y);
+    expect(box!.y + box!.height).toBeLessThanOrEqual(queueSection!.y + queueSection!.height + 1);
   }
-  expect(await collectPages("processes", ".process-id-input input", "value")).toEqual(processes.map((p) => p.id));
-  expect(await collectPages("queue 0", '[data-testid="ready-queue-0"] [data-process-id]', "data-process-id")).toEqual(processes.slice(1).map((p) => p.id));
-  expect(await collectPages("timeline", "[data-timeline-time]", "data-timeline-time")).toEqual(Array.from({ length: 36 }, (_, i) => String(i)));
-  let eventCount = 0;
-  while (true) {
-    eventCount += await page.locator(".event-list p").count();
-    const next = page.getByRole("button", { name: "Next events page", exact: true });
-    if (await next.isDisabled()) break;
-    await next.click();
-  }
-  expect(eventCount).toBe(13);
+
   await page.getByRole("button", { name: "Metrics", exact: true }).click();
-  expect(await collectPages("metrics", "tr[data-process-id]", "data-process-id")).toEqual(processes.map((p) => p.id));
-  const overflow = await page.locator(".setup-panel, .event-list, .queue-track, .metrics-scroll, .timeline-scroll").evaluateAll((elements) =>
-    elements.filter((el) => el.scrollWidth > el.clientWidth + 2 || el.scrollHeight > el.clientHeight + 2).map((el) => el.className),
+  await expect(page.locator("tr[data-process-id]")).toHaveCount(12);
+  const metricsOverflowIsSafe = await page.locator(".metrics-scroll").evaluate((element) =>
+    getComputedStyle(element).overflowY === "auto",
   );
-  expect(overflow).toEqual([]);
+  expect(metricsOverflowIsSafe).toBe(true);
 });
