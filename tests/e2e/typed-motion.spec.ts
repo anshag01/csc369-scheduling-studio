@@ -193,7 +193,7 @@ async function readTravelerToProcessSample(page: Page, key: string) {
 
 test.beforeEach(async ({ page }) => {
   await page.goto("/");
-  await expect(page.getByRole("heading", { name: "Scheduling Studio" })).toBeVisible();
+  await expect(page.getByRole("main", { name: "Scheduling Studio" })).toBeVisible();
   await page.getByRole("button", { name: "Next time step" }).click();
   await expect(page.getByTestId("time-value")).toHaveText("1");
   await page.getByRole("button", { name: "Reset to time zero" }).click();

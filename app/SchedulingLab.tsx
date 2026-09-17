@@ -236,16 +236,7 @@ export default function SchedulingLab({
   );
 
   return (
-    <main className="app-shell">
-      <header className="topbar">
-        <div className="brand-mark" aria-hidden="true"><span>CPU</span><span>LAB</span></div>
-        <div className="brand-copy"><p className="eyebrow">CSC369 · Operating Systems</p><h1>Scheduling Studio</h1></div>
-        <div className="scope-badges">
-          <span>1 CPU</span><span>Discrete time</span><span>CPU bursts only</span>
-          <div className="local-badge"><span className="status-dot" />Browser-local</div>
-        </div>
-      </header>
-
+    <main className="app-shell" aria-label="Scheduling Studio">
       <div className="workspace">
         <aside className="setup-panel" inert={motionBusy ? true : undefined}>
           <section className="panel-section">

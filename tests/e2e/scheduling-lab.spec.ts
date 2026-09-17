@@ -58,7 +58,7 @@ async function assertBoundary(page: Page, trace: string, time: number) {
 
 test.beforeEach(async ({ page }) => {
   await page.goto("/");
-  await expect(page.getByRole("heading", { name: "Scheduling Studio" })).toBeVisible();
+  await expect(page.getByRole("main", { name: "Scheduling Studio" })).toBeVisible();
   // A real interaction proves that the client bundle is hydrated before the
   // test starts making scheduling assertions.
   await page.getByRole("button", { name: "Next time step" }).click();

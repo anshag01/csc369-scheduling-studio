@@ -23,19 +23,10 @@ button, select { cursor: pointer; }
 button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible, summary:focus-visible { outline: 3px solid rgba(79, 107, 237, .24); outline-offset: 2px; }
 
 .app-shell { min-height: 100vh; }
-.topbar { position: relative; min-height: 86px; display: flex; align-items: center; gap: 18px; padding: 14px 28px; overflow: hidden; color: #fff; background: linear-gradient(115deg, #171717 0%, #242424 72%, #222631 125%); border-bottom: 1px solid #383838; box-shadow: 0 6px 20px rgba(0, 0, 0, .12); }
-.topbar::after { content: ""; position: absolute; inset: 0 0 0 auto; width: 45%; pointer-events: none; opacity: .38; background: radial-gradient(circle at 85% 15%, rgba(79, 107, 237, .18), transparent 42%), repeating-linear-gradient(115deg, transparent 0 22px, rgba(255,255,255,.045) 22px 23px); }
-.brand-mark { width: 52px; height: 52px; display: grid; place-content: center; background: var(--green); font-family: var(--font-dm-mono), monospace; font-size: 12px; line-height: 1.05; font-weight: 500; letter-spacing: .12em; text-align: center; transform: rotate(-2deg); box-shadow: 4px 4px 0 rgba(0, 0, 0, .3); }
-.brand-mark span { display: block; }
-.brand-copy h1 { margin: 2px 0 0; font-size: 24px; letter-spacing: -.035em; }
 .eyebrow { margin: 0; font-family: var(--font-dm-mono), monospace; font-size: 10px; font-weight: 500; letter-spacing: .13em; color: #858d96; }
-.topbar .eyebrow { color: #b8b8b3; }
-.scope-badges { position: relative; z-index: 1; margin-left: auto; display: flex; align-items: center; gap: 8px; }
-.scope-badges > span { padding: 7px 10px; color: #c7c7c2; background: rgba(255,255,255,.035); border: 1px solid rgba(255,255,255,.13); border-radius: 999px; font: 9px var(--font-dm-mono), monospace; text-transform: uppercase; letter-spacing: .05em; }
-.local-badge { display: flex; align-items: center; gap: 8px; padding: 8px 12px; background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.16); border-radius: 999px; color: #e5e5e1; font-size: 11px; }
-.status-dot, .live-dot { width: 7px; height: 7px; display: inline-block; border-radius: 50%; background: #6f8cff; box-shadow: 0 0 0 4px rgba(111,140,255,.12); }
+.live-dot { width: 7px; height: 7px; display: inline-block; border-radius: 50%; background: #6f8cff; box-shadow: 0 0 0 4px rgba(111,140,255,.12); }
 
-.workspace { display: grid; grid-template-columns: 360px minmax(0, 1fr); min-height: calc(100vh - 130px); }
+.workspace { display: grid; grid-template-columns: 360px minmax(0, 1fr); min-height: calc(100vh - 44px); }
 .setup-panel { background: linear-gradient(180deg, #fdfdfc 0%, #f7f7f4 100%); border-right: 1px solid var(--line); }
 .panel-section { padding: 26px 24px; border-bottom: 1px solid var(--line); }
 .section-heading, .card-title-row { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-bottom: 18px; }
@@ -244,11 +235,7 @@ footer { display: flex; justify-content: space-between; gap: 16px; padding: 13px
 /* One-screen desktop dashboard */
 @media (min-width: 1001px) and (min-height: 600px) {
   html, body { height: 100%; overflow: hidden; }
-  .app-shell { height: 100vh; min-height: 0; display: grid; grid-template-rows: 68px minmax(0, 1fr); overflow: hidden; }
-  .topbar { min-height: 68px; padding: 8px 20px; }
-  .brand-mark { width: 42px; height: 42px; font-size: 10px; box-shadow: 3px 3px 0 rgba(0,0,0,.22); }
-  .brand-copy h1 { font-size: 20px; }
-  .brand-copy .eyebrow { font-size: 8px; }
+  .app-shell { height: 100vh; min-height: 0; display: grid; grid-template-rows: minmax(0, 1fr); overflow: hidden; }
   .workspace { height: 100%; min-height: 0; grid-template-columns: 328px minmax(0, 1fr); overflow: hidden; }
   .setup-panel { height: 100%; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; }
   .panel-section { padding: 13px 17px; }
@@ -357,7 +344,6 @@ footer { display: flex; justify-content: space-between; gap: 16px; padding: 13px
   .setup-panel, .simulation-panel { height: auto; overflow: visible; }
   .dashboard-grid { display: block; }
   .status-grid { grid-template-columns: 1fr; }
-  .scope-badges > span { display: none; }
   .dashboard-grid .card-surface { margin-top: 16px; }
 }
 @media (max-width: 980px) {
@@ -365,8 +351,6 @@ footer { display: flex; justify-content: space-between; gap: 16px; padding: 13px
   .keyboard-hint { display: none; }
 }
 @media (max-width: 760px) {
-  .topbar { padding: 12px 16px; }
-  .local-badge { font-size: 0; padding: 8px; }
   .workspace { display: block; }
   .setup-panel { border-right: 0; border-bottom: 1px solid var(--line); }
   .simulation-panel { padding: 16px 12px 28px; }
