@@ -257,14 +257,14 @@ footer { display: flex; justify-content: space-between; gap: 16px; padding: 13px
   .process-id-input input { padding-left: 22px; }
   .process-id-input > span { left: 8px; width: 6px; height: 6px; }
   .remove-button { height: 26px; font-size: 17px; }
-  .add-button { margin-top: 6px; padding: 6px; font-size: 9px; }
+  .add-button { margin-top: 6px; padding: 6px; font-size: 11px; }
   .json-panel { margin-top: 8px; padding-top: 7px; }
-  .json-panel summary { font-size: 9px; }
+  .json-panel summary { font-size: 11px; }
 
   .simulation-panel { height: 100%; min-height: 0; display: flex; flex-direction: column; padding: 9px 12px 11px; overflow: hidden; }
   .motion-cue { padding: 4px 8px 4px 5px; }
-  .motion-cue span { padding: 2px 5px; font-size: 6px; }
-  .motion-cue strong { font-size: 7px; }
+  .motion-cue span { padding: 2px 5px; font-size: 7px; }
+  .motion-cue strong { font-size: 8px; }
   .control-strip { min-height: 43px; margin-bottom: 7px; padding: 5px 9px; }
   .playback-controls button { width: 30px; height: 30px; }
   .time-readout strong { font-size: 20px; }
@@ -283,11 +283,11 @@ footer { display: flex; justify-content: space-between; gap: 16px; padding: 13px
   .dashboard-grid .cpu-card, .dashboard-grid .event-card { min-height: 0; height: 100%; padding: 10px 13px; }
   .card-title-row { margin-bottom: 8px; }
   .card-title-row h2 { font-size: 13px; }
-  .queue-summary { gap: 6px; font-size: 8px; }
+  .queue-summary { gap: 6px; font-size: 9px; }
   .boost-countdown { gap: 5px; padding: 2px 6px 2px 3px; }
   .boost-ring { width: 24px; height: 24px; }
   .boost-ring::after { inset: 3px; }
-  .boost-ring b { font-size: 7px; }
+  .boost-ring b { font-size: 9px; }
   .boost-countdown strong, .boost-countdown small { font-size: 7px; }
   .running-content, .idle-content { max-width: calc(100% - 126px); gap: 11px; margin-top: 9px; }
   .cpu-process-copy h2 { font-size: 14px; }
@@ -306,18 +306,19 @@ footer { display: flex; justify-content: space-between; gap: 16px; padding: 13px
   .event-card { display: flex; flex-direction: column; overflow: hidden; }
   .event-card .event-list { min-height: 0; flex: 1; padding-right: 3px; overflow-y: auto; }
   .event-list p { gap: 6px; font-size: 11px; line-height: 1.25; }
-  .event-list p > span { width: 15px; height: 15px; font-size: 7px; }
+  .event-list p > span { width: 15px; height: 15px; font-size: 9px; }
   .queue-row { grid-template-columns: 88px minmax(0, 1fr); gap: 7px; }
   .queue-label { padding: 4px 7px; }
   .queue-label strong { font-size: 10px; }
   .queue-label span { font-size: 8px; }
   .queue-label em { font-size: 5px; }
-  .demotion-cue { bottom: -6px; font-size: 5px; }
+  .demotion-cue { bottom: -6px; font-size: 6px; line-height: 1; }
   .multi-queues { gap: 4px; }
   .queue-track { min-height: 36px; gap: 5px; padding: 4px 7px; }
   .queue-chip { min-width: var(--process-card-width); padding: 3px 6px; }
-  .queue-chip strong { font-size: 10px; }
-  .queue-chip small { font-size: 6px; }
+  .queue-chip strong { font-size: 11px; line-height: 1; }
+  .queue-chip span { font-size: 9px; line-height: 1; }
+  .queue-chip small { font-size: 7px; line-height: 1; }
   .queue-chip.mlfq-queue-chip { min-width: var(--process-card-width); }
   .allotment-meter { height: 2px; margin-top: 2px; }
   .timeline-scroll { padding: 2px 0 8px; }
