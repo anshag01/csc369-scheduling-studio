@@ -359,6 +359,8 @@ function sourceForMissingCard(
     : new DOMRect(window.innerWidth / 2 - width / 2, 24, width, height);
 }
 
+const emptyMotionSteps: string[] = [];
+
 export function useTypedProcessMotion(
   rootRef: RefObject<HTMLDivElement | null>,
   frameKey: string,
@@ -369,6 +371,7 @@ export function useTypedProcessMotion(
   step: number,
   setVisualState: (value: SchedulerVisualState | null) => void,
   setMotionCue: (value: string | null) => void,
+  setMotionSteps: (value: string[]) => void,
   setMotionBusy: (value: boolean) => void,
 ) {
   const previousContext = useRef(contextKey);
@@ -386,6 +389,7 @@ export function useTypedProcessMotion(
     clearArtifacts();
 
     if (!root) {
+      setMotionSteps(emptyMotionSteps);
       setVisualState(null);
       setMotionCue(null);
       setMotionBusy(false);
@@ -461,6 +465,7 @@ export function useTypedProcessMotion(
       root.dataset.lastMotionCount = "0";
       root.dataset.lastMotionTypes = "";
       root.dataset.lastMotionLabels = "";
+      setMotionSteps(emptyMotionSteps);
       setVisualState(null);
       setMotionCue(null);
       setMotionBusy(false);
@@ -468,10 +473,10 @@ export function useTypedProcessMotion(
     }
 
     const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    const phaseDuration = Math.min(1250, Math.max(460, duration));
+    const phaseDuration = Math.min(1800, Math.max(650, duration));
     const guideLead = Math.min(170, Math.max(90, phaseDuration * .16));
     const moveDuration = phaseDuration - guideLead;
-    const gapDuration = 120;
+    const gapDuration = 250;
     const labels = phases.map((phase, index) => phaseText(phase, index, phases.length));
     const movementTypes = phases.flatMap((phase) => phase.moves.map((move) =>
       `${move.from.place}->${move.to.place}`,
@@ -480,6 +485,7 @@ export function useTypedProcessMotion(
     root.dataset.lastMotionCount = String(phases.reduce((count, phase) => count + phase.moves.length, 0));
     root.dataset.lastMotionTypes = movementTypes.join(",");
     root.dataset.lastMotionLabels = labels.join(" | ");
+    setMotionSteps(labels);
 
     if (reducedMotion) {
       for (const [phaseIndex, phase] of phases.entries()) {
@@ -831,5 +837,5 @@ export function useTypedProcessMotion(
       ownedAnimations.clear();
       clearArtifacts();
     };
-  }, [contextKey, duration, frameKey, rootRef, setMotionBusy, setMotionCue, setVisualState, step, transitionStart, transitions]);
+  }, [contextKey, duration, frameKey, rootRef, setMotionBusy, setMotionCue, setMotionSteps, setVisualState, step, transitionStart, transitions]);
 }

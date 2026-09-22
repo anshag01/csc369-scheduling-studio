@@ -86,6 +86,7 @@ export default function SchedulingLab({
   const [jsonText, setJsonText] = useState("");
   const [jsonMessage, setJsonMessage] = useState("");
   const [motionCue, setMotionCue] = useState<string | null>(null);
+  const [motionSteps, setMotionSteps] = useState<string[]>([]);
   const [motionBusy, setMotionBusy] = useState(false);
   const [motionVisualState, setMotionVisualState] = useState<SchedulerVisualState | null>(null);
   const motionLock = useRef(false);
@@ -122,7 +123,10 @@ export default function SchedulingLab({
     const currentStep = stepRef.current;
     if (motionLock.current && animate) return false;
     const nextStep = Math.max(0, Math.min(lastStep, Math.floor(requestedStep)));
-    if (nextStep === currentStep) return false;
+    if (nextStep === currentStep) {
+      if (!animate) setMotionSteps([]);
+      return false;
+    }
 
     const adjacent = Math.abs(nextStep - currentStep) === 1;
     if (animate && adjacent) {
@@ -153,7 +157,7 @@ export default function SchedulingLab({
   useEffect(() => {
     const handleKey = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement;
-      if (["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName)) return;
+      if (["INPUT", "TEXTAREA", "SELECT", "SUMMARY"].includes(target.tagName)) return;
       if (event.key === "ArrowRight") { setPlaying(false); goToStep(stepRef.current + 1); }
       if (event.key === "ArrowLeft") { setPlaying(false); goToStep(stepRef.current - 1); }
       if (event.key === " ") {
@@ -172,6 +176,7 @@ export default function SchedulingLab({
     stepRef.current = 0;
     setMotionBusy(false);
     setMotionVisualState(null);
+    setMotionSteps([]);
     setStep(0);
     setPlaying(false);
   };
@@ -228,7 +233,7 @@ export default function SchedulingLab({
   const motionFrame = snapshot
     ? `${snapshot.time}:${snapshot.running ?? "idle"}:${snapshot.readyQueues.map((queue) => queue.join(".")).join("|")}`
     : "invalid";
-  const motionDuration = speed === 2000 ? 1120 : speed === 1400 ? 820 : 520;
+  const motionDuration = speed === 2000 ? 1800 : speed === 1400 ? 1200 : 650;
   useTypedProcessMotion(
     dashboardRef,
     motionFrame,
@@ -239,6 +244,7 @@ export default function SchedulingLab({
     step,
     setMotionVisualState,
     setMotionCue,
+    setMotionSteps,
     updateMotionBusy,
   );
 
@@ -294,6 +300,10 @@ export default function SchedulingLab({
             <div className="time-readout"><span>TIME</span><strong data-testid="time-value">{snapshot?.time ?? "—"}</strong><span>/ {lastStep}</span></div>
             <div className="motion-cue-slot">
               {motionCue && <div className="motion-cue" role="status" aria-live="polite"><span>MOVING</span><strong>{motionCue}</strong></div>}
+              {motionSteps.length > 0 && <details className="movement-review" key={`${motionContext}:${step}`} onToggle={(event) => { if (event.currentTarget.open) setPlaying(false); }}>
+                <summary>{motionBusy ? "Review steps" : `Review movement · ${motionSteps.length} step${motionSteps.length === 1 ? "" : "s"}`}</summary>
+                <div className="movement-review-panel"><p>Movement to t={snapshot?.time}</p><ol>{motionSteps.map((label, index) => <li key={index}>{label}</li>)}</ol><small>Available until you change the time or scenario.</small></div>
+              </details>}
             </div>
             <label className="speed-control">Speed<select value={speed} disabled={motionBusy} onChange={(event) => setSpeed(Number(event.target.value))}><option value="2000">Slow</option><option value="1400">Normal</option><option value="850">Fast</option></select></label>
             <button className={`metrics-toggle ${showMetrics ? "active" : ""}`} disabled={motionBusy} aria-pressed={showMetrics} onClick={() => setShowMetrics((current) => !current)}>{showMetrics ? "Hide metrics" : "Metrics"}</button>
@@ -329,11 +339,11 @@ export default function SchedulingLab({
               <article className="event-card"><div className="card-label">AT THIS TIME BOUNDARY · t={snapshot.time}</div><div className="event-list" data-testid="event-list" data-event-count={snapshot.events.length}>{snapshot.events.length ? snapshot.events.map((event, index) => <p key={index}><span>{index + 1}</span>{event}</p>) : <p className="muted-event">No scheduling decision was needed.</p>}</div></article>
             </div>
 
-            <section className="queue-section card-surface"><div className="card-title-row"><div><p className="eyebrow">READY STATE</p><h2>{algorithm === "mlfq" ? "Priority feedback map" : "Ready queue"}</h2></div><div className="queue-summary"><span data-testid="state-counts" data-new-count={futureCount} data-ready-count={waitingCount} data-finished-count={completedCount}><b data-motion-future-target>{futureCount} future</b> · {waitingCount} waiting</span>{algorithm === "mlfq" && <div className="boost-countdown" title={`Waiting processes return to Q0 in ${boostTicksRemaining} ticks`}><i className="boost-ring" style={{ "--boost-progress": `${boostProgress}%` } as React.CSSProperties}><b>{boostTicksRemaining}</b></i><span><strong>NEXT BOOST</strong><small>ticks remaining</small></span></div>}</div></div>
+            <section className="queue-section card-surface"><div className="card-title-row"><div><p className="eyebrow">READY STATE</p><h2>{algorithm === "mlfq" ? "Ready queues" : "Ready queue"}</h2></div><div className="queue-summary"><span data-testid="state-counts" data-new-count={futureCount} data-ready-count={waitingCount} data-finished-count={completedCount}><b data-motion-future-target>{futureCount} future</b> · {waitingCount} waiting</span>{algorithm === "mlfq" && <div className="boost-countdown" title={`Waiting processes return to Q0 in ${boostTicksRemaining} ticks`}><i className="boost-ring" style={{ "--boost-progress": `${boostProgress}%` } as React.CSSProperties}><b>{boostTicksRemaining}</b></i><span><strong>NEXT BOOST</strong><small>ticks remaining</small></span></div>}</div></div>
               <div className={algorithm === "mlfq" ? "multi-queues" : "single-queue"}>{displayState?.readyQueues.map((queue, queueIndex) => {
                 const allotted = mlfqQuanta[queueIndex];
                 return <div className="queue-row" key={queueIndex}>
-                  {algorithm === "mlfq" && <div className="queue-label"><div><strong>Q{queueIndex}</strong></div><span>{queueIndex === 0 ? "Highest" : queueIndex === (displayState?.readyQueues.length ?? 0) - 1 ? "Lowest" : "Medium"} · allotment {mlfqQuanta[queueIndex]}</span>{queueIndex < (displayState?.readyQueues.length ?? 0) - 1 && <i className="demotion-cue">full allotment ↓</i>}</div>}
+                  {algorithm === "mlfq" && <div className="queue-label"><div><strong>Q{queueIndex}</strong></div><span>{queueIndex === 0 ? "Highest" : queueIndex === (displayState?.readyQueues.length ?? 0) - 1 ? "Lowest" : "Medium"} priority</span><span>Allotment: {mlfqQuanta[queueIndex]} tick{mlfqQuanta[queueIndex] === 1 ? "" : "s"}</span>{queueIndex < (displayState?.readyQueues.length ?? 0) - 1 && <i className="demotion-cue">full allotment ↓</i>}</div>}
                   <div className="queue-track" data-testid={`ready-queue-${queueIndex}`} data-ready-ids={queue.join(",")}>
                     <span className="queue-head">HEAD</span>
                     {queue.length === 0 ? <span className="empty-queue">Queue empty</span> : queue.map((id) => { const process = processById.get(id)!; const view = displayState?.processes.find((item) => item.id === id); const used = view?.allotmentUsed ?? 0; return <div className={`queue-chip ${algorithm === "mlfq" ? "mlfq-queue-chip" : ""}`} data-process-id={id} data-state="ready" data-remaining={view?.remainingTime} data-allotment-used={algorithm === "mlfq" ? used : undefined} data-motion-id={id} data-motion-place={algorithm === "mlfq" ? `q${queueIndex}` : "ready"} data-motion-color={process.color} key={id} style={{ "--process-color": process.color } as React.CSSProperties} title={algorithm === "mlfq" ? `${id}: ${used} of ${allotted} ticks used at Q${queueIndex}` : undefined}><strong>{id}</strong><span>{view?.remainingTime} left</span>{algorithm === "mlfq" && <small>{used}/{allotted} used</small>}{algorithm === "mlfq" && <i className="allotment-meter" aria-hidden="true"><b style={{ width: `${used / allotted * 100}%` }} /></i>}</div>; })}

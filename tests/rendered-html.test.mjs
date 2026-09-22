@@ -54,7 +54,7 @@ test("keeps the production source free of starter-preview wiring", async () => {
   assert.match(layout, /csc369-scheduling-studio/);
   assert.doesNotMatch(page + layout + packageJson, /codex-preview|react-loading-skeleton|Starter Project/);
 
-  assert.match(schedulingLab, /Priority feedback map/);
+  assert.match(schedulingLab, /Ready queues/);
   assert.match(schedulingLab, /NEXT BOOST/);
   assert.match(schedulingLab, /allotment-meter/);
   assert.match(schedulingLab, /showMetrics/);

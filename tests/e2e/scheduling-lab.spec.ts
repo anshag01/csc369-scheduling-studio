@@ -496,3 +496,29 @@ test("large imported scenarios keep all MLFQ queues, events, metrics, and ticks 
   );
   expect(metricsOverflowIsSafe).toBe(true);
 });
+
+
+test("movement instructions remain reviewable after animation and clear with scenario changes", async ({ page }) => {
+  await page.locator("#algorithm").selectOption("mlfq");
+  await page.locator('[data-timeline-time="3"]').click();
+  await page.getByRole("button", { name: "Next time step" }).click();
+  await expect(page.locator(".motion-cue")).toBeVisible();
+  await expect(page.locator(".motion-cue strong")).toHaveCSS("font-size", "13px");
+  await expect(page.locator(".dashboard-grid")).toHaveAttribute("data-motion-status", "idle");
+  const review = page.locator(".movement-review");
+  await expect(review.locator("summary")).toContainText("3 steps");
+  await review.locator("summary").click();
+  await expect(review.locator("li")).toHaveCount(3);
+  await expect(review).toContainText("demote B → Q1");
+  await expect(review).toContainText("dispatch C → CPU");
+  await page.waitForTimeout(1500);
+  await expect(review.locator(".movement-review-panel")).toBeVisible();
+  await review.locator("summary").click();
+  await page.getByRole("button", { name: "Previous time step" }).click();
+  await expect(page.locator(".dashboard-grid")).toHaveAttribute("data-motion-status", "idle");
+  await review.locator("summary").click();
+  await expect(review).toContainText("undo dispatch C");
+  await review.locator("summary").click();
+  await page.locator("#algorithm").selectOption("rr");
+  await expect(review).toHaveCount(0);
+});

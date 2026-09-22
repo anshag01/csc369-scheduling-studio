@@ -144,7 +144,7 @@ describe("scheduling visualization mirrors simulator snapshots", () => {
     const html = render("mlfq", 3, false);
     expect(html).not.toContain("State &amp; metrics");
     expect(html).toContain('data-testid="state-counts"');
-    expect(html).toContain("Priority feedback map");
+    expect(html).toContain("Ready queues");
     expect(html).toContain("READY STATE");
     expect([...html.matchAll(/data-testid="ready-queue-\d+"/g)]).toHaveLength(3);
   });
