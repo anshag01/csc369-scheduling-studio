@@ -67,7 +67,7 @@ export type SchedulingLabProps = {
 
 export default function SchedulingLab({
   initialProcesses = exampleProcesses,
-  initialAlgorithm = "rr",
+  initialAlgorithm = "fcfs",
   initialQuantum = 2,
   initialMlfqQuanta = [2, 4, 8],
   initialMlfqBoostInterval = 10,
