@@ -522,3 +522,26 @@ test("movement instructions remain reviewable after animation and clear with sce
   await page.locator("#algorithm").selectOption("rr");
   await expect(review).toHaveCount(0);
 });
+
+
+test("short desktop windows keep the enlarged timeline and boost flag inside the panel", async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  for (const height of [600, 660, 700, 720]) {
+    await page.setViewportSize({ width: 1366, height });
+    await page.locator("#algorithm").selectOption("mlfq");
+    await page.locator('[data-timeline-time="10"]').click();
+    const fits = await page.locator(".timeline-section").evaluate((panel) => {
+      const bounds = panel.getBoundingClientRect();
+      const chart = panel.querySelector(".timeline-scroll")!.getBoundingClientRect();
+      return [...panel.querySelectorAll(".tick-block, .tick-label, .boost-marker, .timeline-end")].every((node) => {
+        const rect = node.getBoundingClientRect();
+        return rect.top >= bounds.top && rect.bottom <= bounds.bottom - 8 &&
+          rect.top >= chart.top && rect.bottom <= chart.bottom;
+      });
+    });
+    expect(fits).toBe(true);
+    if (height >= 660) {
+      expect(await page.locator(".simulation-panel").evaluate((panel) => panel.scrollHeight <= panel.clientHeight)).toBe(true);
+    }
+  }
+});
