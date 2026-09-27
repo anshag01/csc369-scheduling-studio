@@ -207,9 +207,12 @@ test("compound MLFQ boundaries expose every authoritative forward and reverse ph
     { id: "B", arrivalTime: 2, serviceTime: 2 },
   ]);
   await page.locator("#algorithm").selectOption("mlfq");
-  await page.getByRole("spinbutton", { name: "Q0" }).fill("2");
-  await page.getByRole("spinbutton", { name: "Q1" }).fill("4");
-  await page.getByRole("spinbutton", { name: "Q2" }).fill("8");
+  await page.getByRole("spinbutton", { name: "Q0 quantum", exact: true }).fill("2");
+  await page.getByRole("spinbutton", { name: "Q0 allotment", exact: true }).fill("2");
+  await page.getByRole("spinbutton", { name: "Q1 quantum", exact: true }).fill("4");
+  await page.getByRole("spinbutton", { name: "Q1 allotment", exact: true }).fill("4");
+  await page.getByRole("spinbutton", { name: "Q2 quantum", exact: true }).fill("8");
+  await page.getByRole("spinbutton", { name: "Q2 allotment", exact: true }).fill("8");
   await page.getByRole("spinbutton", { name: "Boost ticks" }).fill("2");
   await page.locator(".speed-control select").selectOption("2000");
   await page.locator('[data-timeline-time="1"]').click();
@@ -470,9 +473,12 @@ test("multi-process boosts use distinct curved lanes and readable stacking", asy
     { id: "C", arrivalTime: 0, serviceTime: 2 },
   ]);
   await page.locator("#algorithm").selectOption("mlfq");
-  await page.getByRole("spinbutton", { name: "Q0" }).fill("1");
-  await page.getByRole("spinbutton", { name: "Q1" }).fill("1");
-  await page.getByRole("spinbutton", { name: "Q2" }).fill("4");
+  await page.getByRole("spinbutton", { name: "Q0 quantum", exact: true }).fill("1");
+  await page.getByRole("spinbutton", { name: "Q0 allotment", exact: true }).fill("1");
+  await page.getByRole("spinbutton", { name: "Q1 quantum", exact: true }).fill("1");
+  await page.getByRole("spinbutton", { name: "Q1 allotment", exact: true }).fill("1");
+  await page.getByRole("spinbutton", { name: "Q2 quantum", exact: true }).fill("4");
+  await page.getByRole("spinbutton", { name: "Q2 allotment", exact: true }).fill("4");
   await page.getByRole("spinbutton", { name: "Boost ticks" }).fill("5");
   await page.locator(".speed-control select").selectOption("2000");
   await page.locator('[data-timeline-time="4"]').click();
@@ -526,9 +532,12 @@ test("mixed-level boost traffic never lets one moving card mask another", async 
     { id: "D", arrivalTime: 2, serviceTime: 6 },
   ]);
   await page.locator("#algorithm").selectOption("mlfq");
-  await page.getByRole("spinbutton", { name: "Q0" }).fill("1");
-  await page.getByRole("spinbutton", { name: "Q1" }).fill("3");
-  await page.getByRole("spinbutton", { name: "Q2" }).fill("5");
+  await page.getByRole("spinbutton", { name: "Q0 quantum", exact: true }).fill("1");
+  await page.getByRole("spinbutton", { name: "Q0 allotment", exact: true }).fill("1");
+  await page.getByRole("spinbutton", { name: "Q1 quantum", exact: true }).fill("3");
+  await page.getByRole("spinbutton", { name: "Q1 allotment", exact: true }).fill("3");
+  await page.getByRole("spinbutton", { name: "Q2 quantum", exact: true }).fill("5");
+  await page.getByRole("spinbutton", { name: "Q2 allotment", exact: true }).fill("5");
   await page.getByRole("spinbutton", { name: "Boost ticks" }).fill("7");
   await page.locator(".speed-control select").selectOption("2000");
   await page.locator('[data-timeline-time="6"]').click();
@@ -583,40 +592,57 @@ test("RR and STCF expose their policy-specific same-boundary phase order", async
   await expect(page.getByTestId("cpu-process-card")).toHaveAttribute("data-process-id", "B");
 });
 
-test("a protected running MLFQ process stays fixed while waiting work is boosted", async ({ page }) => {
+test("a boost moves the running process to Q0 and reverse stepping restores its old turn", async ({ page }) => {
   await importScenario(page, [
     { id: "A", arrivalTime: 0, serviceTime: 10 },
     { id: "B", arrivalTime: 0, serviceTime: 5 },
   ]);
   await page.locator("#algorithm").selectOption("mlfq");
-  await page.getByRole("spinbutton", { name: "Q0" }).fill("1");
-  await page.getByRole("spinbutton", { name: "Q1" }).fill("4");
-  await page.getByRole("spinbutton", { name: "Q2" }).fill("8");
+  await page.getByRole("spinbutton", { name: "Q0 quantum", exact: true }).fill("1");
+  await page.getByRole("spinbutton", { name: "Q0 allotment", exact: true }).fill("1");
   await page.getByRole("spinbutton", { name: "Boost ticks" }).fill("4");
   await page.locator('[data-timeline-time="3"]').click();
   await page.getByRole("button", { name: "Next time step" }).click();
-
-  await expectPhase(page, "boost", 0, 1);
-  const during = await page.getByTestId("cpu-process-card").evaluate((card) => ({
-    id: card.getAttribute("data-process-id"),
-    queue: card.getAttribute("data-queue-level"),
-    used: card.getAttribute("data-allotment-used"),
-    rect: card.getBoundingClientRect().toJSON(),
-  }));
-  expect(during.id).toBe("A");
-  expect(during.queue).toBe("1");
-  await expect(page.locator('.process-motion-traveler[data-process-id="A"]')).toHaveCount(0);
-  await expect(page.locator('.process-motion-traveler[data-process-id="B"]')).toHaveCount(1);
-
+  const boost = await expectPhase(page, "boost", 0, 2);
+  expect(boost.cpu).toBe("");
+  expect(boost.queues).toEqual(["B,A", "", ""]);
+  expect(boost.travelers.find((traveler) => traveler.id === "A")).toMatchObject({ from: "cpu", to: "q0" });
+  await expectPhase(page, "dispatch", 1, 2);
   await expect(page.locator(".dashboard-grid")).toHaveAttribute("data-motion-status", "idle");
-  const after = await page.getByTestId("cpu-process-card").evaluate((card) => ({
-    id: card.getAttribute("data-process-id"),
-    queue: card.getAttribute("data-queue-level"),
-    used: card.getAttribute("data-allotment-used"),
-    rect: card.getBoundingClientRect().toJSON(),
-  }));
-  expect(after).toEqual(during);
-  await expect(page.getByTestId("ready-queue-0")).toHaveAttribute("data-ready-ids", "B");
+  await expect(page.getByTestId("cpu-process-card")).toHaveAttribute("data-process-id", "B");
+  await expect(page.getByTestId("ready-queue-0")).toHaveAttribute("data-ready-ids", "A");
+  await page.getByRole("button", { name: "Previous time step" }).click();
+  await expectPhase(page, "dispatch", 0, 2);
+  const reverse = await expectPhase(page, "boost", 1, 2);
+  expect(reverse.travelers.find((traveler) => traveler.id === "A")).toMatchObject({ from: "q0", to: "cpu" });
+  await expect(page.locator(".dashboard-grid")).toHaveAttribute("data-motion-status", "idle");
+  await expect(page.getByTestId("cpu-process-card")).toHaveAttribute("data-process-id", "A");
+  await expect(page.getByTestId("cpu-process-card")).toHaveAttribute("data-queue-level", "1");
+  await expect(page.getByTestId("cpu-process-card")).toHaveAttribute("data-allotment-used", "1");
+  await expect(page.getByTestId("cpu-process-card")).toHaveAttribute("data-quantum-used", "1");
+});
+
+test("MLFQ quantum rotation stays in the same queue and reverses with its budget intact", async ({ page }) => {
+  await importScenario(page, [
+    { id: "A", arrivalTime: 0, serviceTime: 6 },
+    { id: "B", arrivalTime: 0, serviceTime: 6 },
+  ]);
+  await page.locator("#algorithm").selectOption("mlfq");
+  await page.getByRole("spinbutton", { name: "Q0 quantum", exact: true }).fill("1");
+  await page.getByRole("spinbutton", { name: "Q0 allotment", exact: true }).fill("4");
+  await page.getByRole("button", { name: "Next time step" }).click();
+  const rotation = await expectPhase(page, "rotate", 0, 2);
+  expect(rotation.queues).toEqual(["B,A", "", ""]);
+  expect(rotation.travelers[0]).toMatchObject({ id: "A", from: "cpu", to: "q0" });
+  await expectPhase(page, "dispatch", 1, 2);
+  await expect(page.locator(".dashboard-grid")).toHaveAttribute("data-motion-status", "idle");
+  await expect(page.locator('.queue-track [data-process-id="A"]')).toHaveAttribute("data-allotment-used", "1");
+  await page.getByRole("button", { name: "Previous time step" }).click();
+  await expectPhase(page, "dispatch", 0, 2);
+  const undo = await expectPhase(page, "rotate", 1, 2);
+  expect(undo.travelers[0]).toMatchObject({ id: "A", from: "q0", to: "cpu" });
+  await expect(page.locator(".dashboard-grid")).toHaveAttribute("data-motion-status", "idle");
+  await expect(page.getByTestId("cpu-process-card")).toHaveAttribute("data-allotment-used", "0");
 });
 
 test("reduced motion snaps to the final state without travelers or a playback lock", async ({ page }) => {
@@ -627,9 +653,12 @@ test("reduced motion snaps to the final state without travelers or a playback lo
     { id: "B", arrivalTime: 2, serviceTime: 2 },
   ]);
   await page.locator("#algorithm").selectOption("mlfq");
-  await page.getByRole("spinbutton", { name: "Q0" }).fill("2");
-  await page.getByRole("spinbutton", { name: "Q1" }).fill("4");
-  await page.getByRole("spinbutton", { name: "Q2" }).fill("8");
+  await page.getByRole("spinbutton", { name: "Q0 quantum", exact: true }).fill("2");
+  await page.getByRole("spinbutton", { name: "Q0 allotment", exact: true }).fill("2");
+  await page.getByRole("spinbutton", { name: "Q1 quantum", exact: true }).fill("4");
+  await page.getByRole("spinbutton", { name: "Q1 allotment", exact: true }).fill("4");
+  await page.getByRole("spinbutton", { name: "Q2 quantum", exact: true }).fill("8");
+  await page.getByRole("spinbutton", { name: "Q2 allotment", exact: true }).fill("8");
   await page.getByRole("spinbutton", { name: "Boost ticks" }).fill("2");
   await page.locator('[data-timeline-time="1"]').click();
   await page.locator(".dashboard-grid").evaluate((dashboard) => {

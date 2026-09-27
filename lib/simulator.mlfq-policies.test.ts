@@ -74,7 +74,7 @@ describe("explicit MLFQ policy regressions", () => {
     );
 
     expect(result.snapshots[3].events.join("\n")).toContain(
-      "A gave up the CPU one tick early at Q0; 3/4 used ticks remain accounted.",
+      "A gave up the CPU one tick early at Q0; 3/4 used allotment ticks remain accounted (3 quantum ticks used).",
     );
     expect(result.snapshots[3].processes.find((item) => item.id === "A")?.allotmentUsed).toBe(3);
     expect(result.snapshots[8].events.join("\n")).toContain(
@@ -82,7 +82,7 @@ describe("explicit MLFQ policy regressions", () => {
     );
   });
 
-  it("moves every waiting unfinished job, but not finished or running jobs, to Q0 on a boost", () => {
+  it("moves every active job, including the runner, to Q0 without reviving finished jobs", () => {
     const result = simulate(
       [process("A", 0, 1), process("B", 0, 12), process("C", 2, 5)],
       config([1, 3, 6], 4),
@@ -90,10 +90,10 @@ describe("explicit MLFQ policy regressions", () => {
 
     const boundary = result.snapshots[4];
     expect(boundary.processes.find((item) => item.id === "A")?.state).toBe("finished");
-    for (const unfinished of boundary.processes.filter((item) => item.state === "ready")) {
+    for (const unfinished of boundary.processes.filter((item) => item.state === "ready" || item.state === "running")) {
       expect(unfinished.queueLevel).toBe(0);
       expect(unfinished.allotmentUsed).toBe(0);
     }
-    expect(boundary.events.some((event) => event.startsWith("Priority boost moved 1 waiting process to Q0"))).toBe(true);
+    expect(boundary.events.some((event) => event.startsWith("Priority boost moved 2 active processes to Q0"))).toBe(true);
   });
 });

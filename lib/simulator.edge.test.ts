@@ -49,8 +49,8 @@ describe("scheduler edge cases and failure containment", () => {
     expect(() => validateSimulationConfig(config("rr", { quantum: 0 }))).toThrow(/quantum/i);
     expect(() => validateSimulationConfig(config("rr", { quantum: 1.5 }))).toThrow(/quantum/i);
     expect(() => validateSimulationConfig(config("mlfq", { mlfqQuanta: [] }))).toThrow(/at least one queue/i);
-    expect(() => validateSimulationConfig(config("mlfq", { mlfqQuanta: [1, 0] }))).toThrow(/allotment/i);
-    expect(() => validateSimulationConfig(config("mlfq", { mlfqQuanta: [1, 2.5] }))).toThrow(/allotment/i);
+    expect(() => validateSimulationConfig(config("mlfq", { mlfqQuanta: [1, 0] }))).toThrow(/quantum/i);
+    expect(() => validateSimulationConfig(config("mlfq", { mlfqQuanta: [1, 2.5] }))).toThrow(/quantum/i);
     expect(() => validateSimulationConfig(config("mlfq", { mlfqBoostInterval: 0 }))).toThrow(/boost interval/i);
     expect(() => validateSimulationConfig(config("mlfq", { mlfqBoostInterval: Number.NaN }))).toThrow(/boost interval/i);
   });
@@ -144,80 +144,37 @@ describe("scheduler edge cases and failure containment", () => {
     expect(result.snapshots[4].processes.find((item) => item.id === "A")?.allotmentUsed).toBe(1);
   });
 
-  it("boosts waiting work while preserving the running process's current turn", () => {
+  it("boosts all active work and leaves finished processes alone", () => {
     const result = simulate(
       [process("A", 0, 1), process("B", 0, 12), process("C", 2, 5)],
       config("mlfq", { mlfqQuanta: [1, 3, 6], mlfqBoostInterval: 4 }),
     );
     const boost = result.snapshots[4];
     expect(boost.processes.find((item) => item.id === "A")?.state).toBe("finished");
-    for (const active of boost.processes.filter((item) => item.state === "ready")) {
+    for (const active of boost.processes.filter((item) => item.state === "ready" || item.state === "running")) {
       expect(active.queueLevel).toBe(0);
       expect(active.allotmentUsed).toBe(0);
     }
     expect(new Set(boost.readyQueues.flat()).size).toBe(boost.readyQueues.flat().length);
   });
 
-  it("does not let a priority boost silently renew the running Q0 quantum", () => {
-    const result = simulate(
-      [
-        process("A", 0, 3),
-        process("B", 2, 6),
-        process("C", 4, 4),
-        process("D", 6, 5),
-        process("E", 8, 2),
-      ],
-      config("mlfq", { mlfqQuanta: [2, 4, 8], mlfqBoostInterval: 3 }),
-    );
-
-    expect(result.timeline.slice(2, 5).map((slice) => slice.processId).join("")).toBe("BBA");
-    expect(result.snapshots[3].running).toBe("B");
-    expect(result.snapshots[3].processes.find((item) => item.id === "B")?.allotmentUsed).toBe(1);
-    expect(result.snapshots[3].events.join("\n")).toContain(
-      "Priority boost moved 1 waiting process to Q0; B remained on the CPU in Q0 with 1/2 ticks used.",
-    );
-    expect(result.snapshots[4].events.join("\n")).toContain(
-      "B used its full allotment and moved from Q0 to Q1.",
-    );
-    expect(result.snapshots[4].running).toBe("A");
-  });
-
-  it("lets a running Q1 process finish its existing allotment after a boost", () => {
-    const result = simulate(
-      [process("A", 0, 10), process("B", 0, 5)],
-      config("mlfq", { mlfqQuanta: [1, 4, 8], mlfqBoostInterval: 4 }),
-    );
-
-    expect(result.timeline.slice(2, 7).map((slice) => slice.processId).join("")).toBe("AAAAB");
-    expect(result.snapshots[4].running).toBe("A");
-    expect(result.snapshots[4].processes.find((item) => item.id === "A")).toMatchObject({
-      queueLevel: 1,
-      allotmentUsed: 2,
-      state: "running",
+  it.each([
+    { level: 0, quanta: [4, 8, 16], time: 2 },
+    { level: 1, quanta: [1, 4, 8], time: 4 },
+    { level: 2, quanta: [1, 1, 4], time: 5 },
+  ])("preempts a running Q$level process and places it last with fresh budgets", ({ level, quanta, time }) => {
+    const result = simulate([process("A", 0, 10), process("B", 0, 5)],
+      config("mlfq", { mlfqQuanta: quanta, mlfqBoostInterval: time }));
+    const boundary = result.snapshots[time];
+    expect(boundary.transitionStart.running).toBe("A");
+    expect(boundary.transitionStart.runningQueueLevel).toBe(level);
+    expect(boundary.running).toBe("B");
+    expect(boundary.readyQueues).toEqual([["A"], [], []]);
+    expect(boundary.processes.find((job) => job.id === "A")).toMatchObject({
+      queueLevel: 0, quantumUsed: 0, allotmentUsed: 0, state: "ready",
+      remainingTime: boundary.transitionStart.runningRemaining,
     });
-    expect(result.snapshots[4].readyQueues[0]).toEqual(["B"]);
-    expect(result.snapshots[4].events.join("\n")).toContain(
-      "Priority boost moved 1 waiting process to Q0; A remained on the CPU in Q1 with 2/4 ticks used.",
-    );
-    expect(result.snapshots[6].events.join("\n")).toContain(
-      "A used its full allotment and moved from Q1 to Q2.",
-    );
-  });
-
-  it("lets a running Q2 process finish its existing allotment after a boost", () => {
-    const result = simulate(
-      [process("A", 0, 10), process("B", 0, 5)],
-      config("mlfq", { mlfqQuanta: [1, 1, 4], mlfqBoostInterval: 5 }),
-    );
-
-    expect(result.snapshots[5].running).toBe("A");
-    expect(result.snapshots[5].processes.find((item) => item.id === "A")).toMatchObject({
-      queueLevel: 2,
-      allotmentUsed: 1,
-      state: "running",
-    });
-    expect(result.snapshots[5].readyQueues[0]).toEqual(["B"]);
-    expect(result.timeline.slice(4, 8).map((slice) => slice.processId).join("")).toBe("AAAA");
+    expect(boundary.events[0]).toContain("A was preempted and placed after all waiting processes");
   });
 
   it("demotes an expired process before boosting it at the same boundary", () => {
@@ -228,7 +185,7 @@ describe("scheduler edge cases and failure containment", () => {
     const boundary = result.snapshots[2];
 
     expect(boundary.events[0]).toBe("B used its full allotment and moved from Q0 to Q1. 1/1 ticks used; 4 service ticks remain.");
-    expect(boundary.events[1]).toBe("Priority boost moved 2 waiting processes to Q0.");
+    expect(boundary.events[1]).toBe("Priority boost moved 2 waiting processes to Q0 with fresh quantum and allotment.");
     expect(boundary.running).toBe("A");
     expect(boundary.readyQueues[0]).toEqual(["B"]);
     expect(boundary.processes.find((item) => item.id === "B")).toMatchObject({

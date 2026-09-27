@@ -51,7 +51,7 @@ describe("scheduling simulator", () => {
 
     expect(result.timeline.slice(0, 8).map((slice) => slice.processId).join("")).toBe("AAABBBBA");
     expect(result.snapshots[3].events.join("\n")).toContain(
-      "A gave up the CPU one tick early at Q0; 3/4 used ticks remain accounted.",
+      "A gave up the CPU one tick early at Q0; 3/4 used allotment ticks remain accounted (3 quantum ticks used).",
     );
     expect(result.snapshots[8].events.join("\n")).toContain("A used its full allotment and moved from Q0 to Q1.");
   });
@@ -63,9 +63,9 @@ describe("scheduling simulator", () => {
     );
 
     expect(result.snapshots[5].events.some((event) =>
-      event.startsWith("Priority boost moved 1 waiting process to Q0"),
+      event.startsWith("Priority boost moved 2 active processes to Q0"),
     )).toBe(true);
-    expect(result.snapshots[5].processes.filter((item) => item.state === "ready").every((item) => item.queueLevel === 0)).toBe(true);
+    expect(result.snapshots[5].processes.filter((item) => item.state === "ready" || item.state === "running").every((item) => item.queueLevel === 0)).toBe(true);
   });
 
   it("uses round robin at each MLFQ priority level and preserves queue order", () => {

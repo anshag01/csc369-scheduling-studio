@@ -99,7 +99,7 @@ test("the running process appears only on the CPU for every policy", async ({ pa
     await expect(cpuProcessCard).toContainText("A");
     await expect(cpuProcessCard).toContainText("2 left");
     await expect(cpuProcessCard).not.toContainText("ON CPU");
-    await expect(page.locator(".cpu-process-copy")).toContainText("2 ticks remaining");
+    await expect(page.locator(".cpu-process-copy")).toContainText("2 ticks of CPU service remaining");
     await expect(page.getByTestId("ready-queue-0")).toHaveAttribute("data-ready-ids", "");
     await expect(page.locator('.queue-track [data-state="running"]')).toHaveCount(0);
 
@@ -146,11 +146,11 @@ test("CPU and ready process cards keep identical geometry", async ({ page }) => 
     const copyRect = cpu.querySelector<HTMLElement>(".cpu-process-copy")!.getBoundingClientRect();
     const dockRect = cpu.querySelector<HTMLElement>(".completion-dock")!.getBoundingClientRect();
     return {
-      toRightOfCopy: dockRect.left >= copyRect.right,
+      separateFromCopy: dockRect.left >= copyRect.right || dockRect.bottom <= copyRect.top || dockRect.top >= copyRect.bottom,
       insideCpu: dockRect.left >= cpuRect.left && dockRect.right <= cpuRect.right && dockRect.top >= cpuRect.top && dockRect.bottom <= cpuRect.bottom,
     };
   });
-  expect(completionPlacement).toEqual({ toRightOfCopy: true, insideCpu: true });
+  expect(completionPlacement).toEqual({ separateFromCopy: true, insideCpu: true });
 });
 
 test("process cards animate every scheduler transfer and reverse step without duplicates", async ({ page }) => {
@@ -245,20 +245,24 @@ test("completion and MLFQ boosts have complete, destination-based animations", a
   }));
   await page.getByRole("button", { name: "Import", exact: true }).click();
   await page.locator("#algorithm").selectOption("mlfq");
-  await page.getByRole("spinbutton", { name: "Q0" }).fill("1");
-  await page.getByRole("spinbutton", { name: "Q1" }).fill("4");
-  await page.getByRole("spinbutton", { name: "Q2" }).fill("8");
+  await page.getByRole("spinbutton", { name: "Q0 quantum", exact: true }).fill("1");
+  await page.getByRole("spinbutton", { name: "Q0 allotment", exact: true }).fill("1");
+  await page.getByRole("spinbutton", { name: "Q1 quantum", exact: true }).fill("4");
+  await page.getByRole("spinbutton", { name: "Q1 allotment", exact: true }).fill("4");
+  await page.getByRole("spinbutton", { name: "Q2 quantum", exact: true }).fill("8");
+  await page.getByRole("spinbutton", { name: "Q2 allotment", exact: true }).fill("8");
   await page.getByRole("spinbutton", { name: "Boost ticks" }).fill("4");
   await page.locator('[data-timeline-time="3"]').click();
   await page.getByRole("button", { name: "Next time step" }).click();
 
-  await expect(page.getByTestId("cpu-process-card")).toHaveAttribute("data-process-id", "A");
-  await expect(page.locator(".cpu-process-copy")).toContainText("Q1 · 2/4 allotment used");
-  await expect(page.getByTestId("ready-queue-0")).toHaveAttribute("data-ready-ids", "B");
-  await expect(page.locator(".dashboard-grid")).toHaveAttribute("data-last-motion-types", /q1->q0/);
-  await expect(page.locator('.process-motion-arrow[data-motion-action="boost"][data-motion-process-id="B"]')).toHaveAttribute("data-motion-detail", /priority boost B → Q0/);
-  await expect(page.locator(".motion-cue")).toContainText("priority boost B → Q0");
-  await expect(page.getByTestId("event-list")).toContainText("A remained on the CPU in Q1");
+  await expect(page.locator('.process-motion-traveler[data-motion-action="boost"][data-process-id="A"]')).toHaveAttribute("data-motion-from", "cpu");
+  await expect(page.locator('.process-motion-traveler[data-motion-action="boost"][data-process-id="A"]')).toHaveAttribute("data-motion-to", "q0");
+  await expect(page.locator(".motion-cue")).toContainText("priority boost B, A → Q0");
+  await expect(page.getByTestId("event-list")).toContainText("A was preempted and placed after all waiting processes");
+  await expect(page.locator(".dashboard-grid")).toHaveAttribute("data-motion-status", "idle");
+  await expect(page.getByTestId("cpu-process-card")).toHaveAttribute("data-process-id", "B");
+  await expect(page.getByTestId("ready-queue-0")).toHaveAttribute("data-ready-ids", "A");
+  await expect(page.getByTestId("running-budgets")).toHaveText("Quantum left: 1 · Allotment left: 1");
 });
 
 test("MLFQ demotion and higher-priority preemption animate to their exact destinations", async ({ page }) => {
@@ -271,9 +275,12 @@ test("MLFQ demotion and higher-priority preemption animate to their exact destin
   }));
   await page.getByRole("button", { name: "Import", exact: true }).click();
   await page.locator("#algorithm").selectOption("mlfq");
-  await page.getByRole("spinbutton", { name: "Q0" }).fill("2");
-  await page.getByRole("spinbutton", { name: "Q1" }).fill("4");
-  await page.getByRole("spinbutton", { name: "Q2" }).fill("8");
+  await page.getByRole("spinbutton", { name: "Q0 quantum", exact: true }).fill("2");
+  await page.getByRole("spinbutton", { name: "Q0 allotment", exact: true }).fill("2");
+  await page.getByRole("spinbutton", { name: "Q1 quantum", exact: true }).fill("4");
+  await page.getByRole("spinbutton", { name: "Q1 allotment", exact: true }).fill("4");
+  await page.getByRole("spinbutton", { name: "Q2 quantum", exact: true }).fill("8");
+  await page.getByRole("spinbutton", { name: "Q2 allotment", exact: true }).fill("8");
   await page.getByRole("spinbutton", { name: "Boost ticks" }).fill("100");
 
   await page.locator('[data-timeline-time="1"]').click();
@@ -295,7 +302,8 @@ test("MLFQ demotion and higher-priority preemption animate to their exact destin
     ],
   }));
   await page.getByRole("button", { name: "Import", exact: true }).click();
-  await page.getByRole("spinbutton", { name: "Q0" }).fill("1");
+  await page.getByRole("spinbutton", { name: "Q0 quantum", exact: true }).fill("1");
+  await page.getByRole("spinbutton", { name: "Q0 allotment", exact: true }).fill("1");
   await page.locator('[data-timeline-time="1"]').click();
   await page.getByRole("button", { name: "Next time step" }).click();
   await expect(dashboard).toHaveAttribute("data-last-motion-types", /cpu->q1/);
@@ -331,7 +339,8 @@ test("an immediately redispatched process still shows its intermediate queue mov
   await expect(page.getByTestId("ready-queue-0")).toHaveAttribute("data-ready-ids", "");
 
   await page.locator("#algorithm").selectOption("mlfq");
-  await page.getByRole("spinbutton", { name: "Q0" }).fill("1");
+  await page.getByRole("spinbutton", { name: "Q0 quantum", exact: true }).fill("1");
+  await page.getByRole("spinbutton", { name: "Q0 allotment", exact: true }).fill("1");
   await page.getByRole("spinbutton", { name: "Boost ticks" }).fill("100");
   await page.getByRole("button", { name: "Next time step" }).click();
   await expect(dashboard).toHaveAttribute("data-last-motion-types", "cpu->q1,q1->cpu");
@@ -340,7 +349,8 @@ test("an immediately redispatched process still shows its intermediate queue mov
   await expect(page.getByTestId("ready-queue-1")).toHaveAttribute("data-ready-ids", "");
   await expect(dashboard).toHaveAttribute("data-motion-status", "idle");
 
-  await page.getByRole("spinbutton", { name: "Q0" }).fill("2");
+  await page.getByRole("spinbutton", { name: "Q0 quantum", exact: true }).fill("2");
+  await page.getByRole("spinbutton", { name: "Q0 allotment", exact: true }).fill("2");
   await page.getByRole("spinbutton", { name: "Boost ticks" }).fill("2");
   await page.locator('[data-timeline-time="1"]').click();
   await page.getByRole("button", { name: "Next time step" }).click();
@@ -377,46 +387,54 @@ test("playback, keyboard stepping, reset, and timeline inspection stay synchroni
   await expect(page.getByRole("button", { name: "Play simulation" })).toBeVisible();
 });
 
-test("a priority boost never renews the running Q0 Round Robin turn", async ({ page }) => {
+test("a priority boost preempts a Q0 runner and resets its budgets", async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
   await page.locator("#algorithm").selectOption("mlfq");
-  await expect(page.getByText("Quantum (= allotment) per queue", { exact: true })).toBeVisible();
+  await expect(page.getByText("Queue budgets (ticks)", { exact: true })).toBeVisible();
   await page.getByRole("spinbutton", { name: "Boost ticks" }).fill("3");
-
-  const trace = await page.locator("[data-timeline-time]").evaluateAll((ticks) =>
-    ticks.map((tick) => tick.getAttribute("data-process-id") ?? "").join(""),
-  );
-  expect(trace).toBe("AABBACCBBDDEECCBBDDD");
-
   const boostTicks = page.locator('[data-boost-boundary="true"]');
   await expect(boostTicks).toHaveCount(6);
-  expect(await boostTicks.evaluateAll((ticks) => ticks.map((tick) => tick.getAttribute("data-timeline-time")))).toEqual([
-    "3", "6", "9", "12", "15", "18",
-  ]);
-  await expect(page.locator('[data-timeline-time="3"] .boost-marker')).toHaveText("BOOST");
-
+  expect(await boostTicks.evaluateAll((ticks) => ticks.map((tick) => tick.getAttribute("data-timeline-time")))).toEqual(["3", "6", "9", "12", "15", "18"]);
   await page.locator('[data-timeline-time="3"]').click();
-  await expect(page.locator(".dashboard-grid")).toHaveAttribute("data-running-process", "B");
-  const cpuProcessCard = page.getByTestId("cpu-process-card");
-  await expect(page.locator(".cpu-process-copy")).toContainText("Q0 · 1/2 allotment used");
-  await expect(cpuProcessCard).toHaveCount(1);
-  await expect(cpuProcessCard).toHaveAttribute("data-process-id", "B");
-  await expect(cpuProcessCard).toHaveAttribute("data-queue-level", "0");
-  await expect(cpuProcessCard).toHaveAttribute("data-remaining", "5");
-  await expect(cpuProcessCard).toHaveAttribute("data-allotment-used", "1");
-  await expect(cpuProcessCard).toContainText("5 left");
-  await expect(page.locator(".cpu-process-copy")).toContainText("5 ticks remaining");
-  await expect(page.getByTestId("ready-queue-0")).toHaveAttribute("data-ready-ids", "A");
-  await expect(page.locator('.queue-track [data-process-id="B"]')).toHaveCount(0);
-  await expect(page.getByTestId("event-list")).toContainText(
-    "B remained on the CPU in Q0 with 1/2 ticks used",
-  );
-
+  await expect(page.getByTestId("cpu-process-card")).toHaveAttribute("data-process-id", "A");
+  await expect(page.getByTestId("ready-queue-0")).toHaveAttribute("data-ready-ids", "B");
+  const b = page.locator('.queue-track [data-process-id="B"]');
+  await expect(b).toHaveAttribute("data-allotment-used", "0");
+  await expect(b).toHaveAttribute("data-quantum-used", "0");
+  await expect(b).toHaveAttribute("data-remaining", "5");
+  await expect(page.getByTestId("event-list")).toContainText("B was preempted and placed after all waiting processes");
   await page.getByRole("button", { name: "Next time step" }).click();
-  await expect(page.locator(".dashboard-grid")).toHaveAttribute("data-running-process", "A");
-  await expect(page.getByTestId("ready-queue-1")).toHaveAttribute("data-ready-ids", "B");
-  await expect(page.getByTestId("event-list")).toContainText(
-    "B used its full allotment and moved from Q0 to Q1",
-  );
+  await expect(page.getByTestId("cpu-process-card")).toHaveAttribute("data-process-id", "B");
+  await expect(page.getByTestId("ready-queue-0")).toHaveAttribute("data-ready-ids", "C");
+});
+
+test("independent queue settings show remaining turn and allotment budgets", async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.locator(".json-panel summary").click();
+  await page.getByLabel("Scenario JSON").fill(JSON.stringify({ processes: [
+    { id: "A", arrivalTime: 0, serviceTime: 6 },
+    { id: "B", arrivalTime: 0, serviceTime: 6 },
+  ] }));
+  await page.getByRole("button", { name: "Import", exact: true }).click();
+  await page.locator("#algorithm").selectOption("mlfq");
+  await page.getByRole("spinbutton", { name: "Q0 quantum", exact: true }).fill("2");
+  await page.getByRole("spinbutton", { name: "Q0 allotment", exact: true }).fill("3");
+  await page.getByRole("spinbutton", { name: "Boost ticks" }).fill("100");
+  await page.locator('[data-timeline-time="4"]').click();
+  await expect(page.getByTestId("cpu-process-card")).toHaveAttribute("data-process-id", "A");
+  await expect(page.getByTestId("running-budgets")).toHaveText("Quantum left: 2 · Allotment left: 1");
+  await expect(page.locator(".cpu-process-copy")).toContainText("4 ticks of CPU service remaining");
+  await page.getByRole("button", { name: "Metrics", exact: true }).click();
+  await expect(page.getByRole("columnheader", { name: "Quantum left" })).toBeVisible();
+  await expect(page.getByRole("columnheader", { name: "Allotment left" })).toBeVisible();
+  await page.getByRole("button", { name: "Next time step" }).click();
+  await expect(page.getByTestId("event-list")).toContainText("A used its full allotment and moved from Q0 to Q1");
+  await expect(page.getByTestId("ready-queue-1")).toHaveAttribute("data-ready-ids", "A");
+  await page.getByRole("button", { name: "Previous time step" }).click();
+  await expect(page.getByTestId("running-budgets")).toHaveText("Quantum left: 2 · Allotment left: 1");
+  await page.getByRole("spinbutton", { name: "Q0 quantum", exact: true }).fill("1");
+  await expect(page.getByTestId("time-value")).toHaveText("0");
+  await expect(page.getByRole("spinbutton", { name: "Q0 allotment", exact: true })).toHaveValue("3");
 });
 
 test("invalid edits never leave stale visualization data on screen", async ({ page }) => {

@@ -47,6 +47,7 @@ input { min-width: 0; padding: 8px 9px; }
 .number-with-unit span { padding: 8px; color: var(--muted); background: #f0f0ed; border: 1px solid #d8d8d4; border-left: 0; border-radius: 0 6px 6px 0; font: 10px var(--font-dm-mono), monospace; }
 .mlfq-settings { margin-top: 14px; padding-top: 14px; border-top: 1px dashed var(--line); }
 .mlfq-settings label { display: grid; grid-template-columns: 28px 1fr 36px; align-items: center; gap: 7px; margin-top: 7px; color: var(--muted); font: 11px var(--font-dm-mono), monospace; }
+.mlfq-budget-heading, .mlfq-budget-row { display: grid; grid-template-columns: 42px minmax(0, 1fr) minmax(0, 1fr); align-items: center; gap: 7px; margin-top: 7px; color: var(--muted); font: 11px var(--font-dm-mono), monospace; }
 .mlfq-settings input { width: 100%; padding: 6px 8px; }
 .mlfq-settings .boost-setting { grid-template-columns: 42px 1fr 36px; margin-top: 8px; padding-top: 7px; border-top: 1px dashed var(--line); }
 .policy-note { position: relative; margin-top: 16px; padding: 13px 14px 13px 16px; overflow: hidden; background: linear-gradient(135deg, #fff 0%, #f0f2ff 100%); border: 1px solid #dfe3f5; border-radius: 7px; }
@@ -351,7 +352,7 @@ footer { display: flex; justify-content: space-between; gap: 16px; padding: 13px
 .movement-review-panel ol { display: grid; gap: 12px; margin: 0; padding: 0; list-style: none; }
 .movement-review-panel li { font-size: 14px; line-height: 1.5; overflow-wrap: anywhere; }
 .movement-review-panel small { display: block; margin-top: 12px; color: var(--muted); font-size: 12px; }
-.cpu-process-copy { display: grid; gap: 3px; }
+.cpu-process-copy { display: grid; gap: 3px; min-width: 0; }
 .cpu-process-copy p, .cpu-process-copy h2 { margin: 0; line-height: 1.25; }
 .cpu-process-copy > span { display: block; line-height: 1.4; }
 .cpu-process-copy small { margin-top: 0; line-height: 1.3; }

@@ -55,13 +55,15 @@ describe("decision explanations are grounded in the scheduling state", () => {
     expect(result.snapshots[1].events.join(" ")).not.toContain("Q1");
   });
 
-  it("explains the protected running turn after a boost without resetting its budget", () => {
+  it("explains the boost preemption, budget reset, and next selection", () => {
     const result = simulate([job("A", 0, 10), job("B", 0, 5)], config("mlfq", { mlfqQuanta: [1, 4, 8], mlfqBoostInterval: 4 }));
     const boundary = result.snapshots[4];
-    expect(boundary.running).toBe("A");
-    expect(boundary.readyQueues[0]).toEqual(["B"]);
-    expect(boundary.events.at(-1)).toBe("A continues in Q1: the boost preserves its current CPU turn (2/4 allotment ticks used).");
-    expect(result.snapshots[5].events.at(-1)).toBe("A continues in Q1: the boost preserves its current CPU turn (3/4 allotment ticks used).");
+    expect(boundary.running).toBe("B");
+    expect(boundary.readyQueues[0]).toEqual(["A"]);
+    expect(boundary.events).toEqual([
+      "Priority boost moved 2 active processes to Q0 with fresh quantum and allotment; A was preempted and placed after all waiting processes.",
+      "B was selected: it is first in Q0, the highest-priority non-empty queue.",
+    ]);
   });
 
   it("explains idle time immediately after completion and marks the final boundary", () => {

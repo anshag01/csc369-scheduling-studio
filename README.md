@@ -20,11 +20,14 @@ The simulator runs entirely in the browser. Each student has an independent loca
 - JSON scenario import and export
 - Play, pause, reset, previous, and next-step controls
 - Current CPU state and ordered ready queue visualization
-- Multiple priority queues and demotion events for MLFQ
+- Multiple priority queues, separate quantum/allotment settings, and demotion events for MLFQ
+- Priority boosts that preempt and reset all active processes to Q0
 - Clickable execution timeline
 - Step-by-step scheduling explanations
 - Waiting, response, and turnaround metrics
 - Keyboard controls and responsive layout
+
+The implemented MLFQ behavior, including simultaneous-event ordering, is documented in [MLFQ_RULES.md](MLFQ_RULES.md).
 
 ## Development
 

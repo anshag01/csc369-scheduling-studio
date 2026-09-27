@@ -94,7 +94,7 @@ describe("scheduling visualization mirrors simulator snapshots", () => {
             algorithm === "mlfq" ? String(runningView.allotmentUsed) : null,
           );
           expect(attribute(cpuProcessTags[0], "data-quantum-used")).toBe(
-            algorithm === "rr" ? String(runningView.allotmentUsed) : null,
+            algorithm === "rr" || algorithm === "mlfq" ? String(runningView.quantumUsed) : null,
           );
           expect(snapshot.readyQueues.flat()).not.toContain(snapshot.running);
         } else {

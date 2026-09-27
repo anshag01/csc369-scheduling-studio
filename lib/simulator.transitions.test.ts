@@ -134,7 +134,7 @@ describe("authoritative scheduler transition phases", () => {
     expect(boundary.transitions[2].moves[0].processId).toBe("B");
   });
 
-  it("never gives the protected running process a boost move", () => {
+  it("records the running process moving from CPU to the tail of boosted Q0", () => {
     const boundary = simulate([
       process("A", 0, 10),
       process("B", 0, 5),
@@ -146,10 +146,12 @@ describe("authoritative scheduler transition phases", () => {
     }).snapshots[4];
 
     const boost = boundary.transitions.find((phase) => phase.action === "boost");
-    expect(boundary.running).toBe("A");
-    expect(boost?.moves.map((move) => move.processId)).toEqual(["B"]);
-    expect(boost?.moves.some((move) => move.processId === "A")).toBe(false);
-    expect(boost?.after.running).toBe("A");
+    expect(boundary.running).toBe("B");
+    expect(boost?.moves.map((move) => move.processId)).toEqual(["B", "A"]);
+    expect(boost?.moves[1]).toEqual({ processId: "A", from: { place: "cpu" }, to: { place: "q0", index: 1 } });
+    expect(boost?.after.running).toBeNull();
+    expect(boost?.after.readyQueues).toEqual([["B", "A"], [], []]);
+    expect(boundary.transitions.map((phase) => phase.action)).toEqual(["boost", "dispatch"]);
   });
 
   it("ends every non-empty phase sequence at the unchanged final snapshot", () => {
@@ -190,6 +192,7 @@ describe("authoritative scheduler transition phases", () => {
         algorithm,
         quantum: 1 + random(4),
         mlfqQuanta: [1 + random(4), 2 + random(5), 4 + random(7)],
+        mlfqAllotments: [1 + random(7), 1 + random(9), 1 + random(12)],
         mlfqBoostInterval: 1 + random(8),
       });
 

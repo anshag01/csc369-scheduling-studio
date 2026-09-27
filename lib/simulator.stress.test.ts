@@ -13,13 +13,13 @@ type ReferenceJob = ProcessDefinition & {
   remaining: number;
   level: number;
   used: number;
-  protected: boolean;
+  turn: number;
 };
 
 type ReferenceSnapshot = {
   running: string | null;
   readyQueues: string[][];
-  processes: Array<{ id: string; remaining: number; level: number; used: number }>;
+  processes: Array<{ id: string; remaining: number; level: number; used: number; turn: number }>;
 };
 
 type ReferenceResult = {
@@ -70,7 +70,7 @@ function referenceSimulation(
       remaining: process.serviceTime,
       level: 0,
       used: 0,
-      protected: false,
+      turn: 0,
     }))
     .sort(stableOrder);
   const queueCount = config.algorithm === "mlfq" ? config.mlfqQuanta.length : 1;
@@ -82,81 +82,47 @@ function referenceSimulation(
   for (let time = 0; jobs.some((job) => job.remaining > 0); time += 1) {
     if (running?.remaining === 0) running = null;
 
-    let expired: ReferenceJob | null = null;
-    let yielded: ReferenceJob | null = null;
-    const boostDue =
-      config.algorithm === "mlfq" &&
-      config.mlfqBoostInterval !== undefined &&
-      time > 0 &&
-      time % config.mlfqBoostInterval === 0;
-
-    if (config.algorithm === "rr" && running && running.used >= config.quantum) {
-      expired = running;
+    let pending: ReferenceJob | null = null;
+    const boostDue = config.algorithm === "mlfq" && config.mlfqBoostInterval !== undefined &&
+      time > 0 && time % config.mlfqBoostInterval === 0;
+    if (running && config.algorithm === "rr" && running.used >= config.quantum) {
+      pending = running;
       running = null;
-    } else if (config.algorithm === "mlfq" && running) {
-      const allotment = config.mlfqQuanta[running.level];
-      if (running.used >= allotment) {
-        expired = running;
+      pending.used = 0;
+      pending.turn = 0;
+    } else if (running && config.algorithm === "mlfq") {
+      const budget = (config.mlfqAllotments ?? config.mlfqQuanta)[running.level];
+      const slice = config.mlfqQuanta[running.level];
+      const demote = running.used >= budget;
+      if (demote || running.turn >= slice || (running.relinquishEarly && slice >= 2 && running.turn === slice - 1)) {
+        pending = running;
         running = null;
-      } else if (
-        running.relinquishEarly &&
-        allotment >= 2 &&
-        running.used === allotment - 1
-      ) {
-        yielded = running;
-        running = null;
+        pending.turn = 0;
+        if (demote) {
+          pending.level = Math.min(pending.level + 1, queueCount - 1);
+          pending.used = 0;
+        }
       }
     }
-
     if (boostDue) {
-      if (yielded) {
-        yielded.protected = false;
-        queues[yielded.level].push(yielded);
-        yielded = null;
-      }
-      if (expired) {
-        expired.protected = false;
-        expired.used = 0;
-        expired.level = Math.min(expired.level + 1, queueCount - 1);
-        queues[expired.level].push(expired);
-        expired = null;
-      }
-      const waiting = queues.flat();
-      for (const queue of queues) queue.length = 0;
-      for (const job of waiting) {
-        job.level = 0;
-        job.used = 0;
-        job.protected = false;
-        queues[0].push(job);
-      }
-      if (running) running.protected = running.level > 0;
+      if (pending) { queues[pending.level].push(pending); pending = null; }
+      const active = queues.flat();
+      if (running) active.push(running);
+      queues.forEach((queue) => { queue.length = 0; });
+      active.forEach((job) => { job.level = 0; job.used = 0; job.turn = 0; });
+      queues[0].push(...active);
+      running = null;
     }
-
     for (const job of jobs) {
-      if (job.arrivalTime === time && job.remaining > 0) {
-        job.level = 0;
-        job.used = 0;
-        queues[0].push(job);
-      }
+      if (job.arrivalTime === time && job.remaining > 0) queues[0].push(job);
     }
-
-    if (yielded) {
-      yielded.protected = false;
-      queues[yielded.level].push(yielded);
-    }
-    if (expired) {
-      expired.protected = false;
-      expired.used = 0;
-      if (config.algorithm === "mlfq") {
-        expired.level = Math.min(expired.level + 1, queueCount - 1);
-      }
-      queues[expired.level].push(expired);
-    }
+    if (pending) queues[pending.level].push(pending);
 
     if (config.algorithm === "stcf" && running && queues[0].length > 0) {
       const shortestReady = Math.min(...queues[0].map((job) => job.remaining));
       if (shortestReady < running.remaining) {
         running.used = 0;
+        running.turn = 0;
         queues[0].push(running);
         running = null;
       }
@@ -165,7 +131,6 @@ function referenceSimulation(
     if (
       config.algorithm === "mlfq" &&
       running &&
-      !running.protected &&
       queues.slice(0, running.level).some((queue) => queue.length > 0)
     ) {
       queues[running.level].unshift(running);
@@ -186,7 +151,6 @@ function referenceSimulation(
       } else {
         running = queues[0].shift() ?? null;
       }
-      if (running) running.protected = false;
     }
 
     snapshots.push({
@@ -197,12 +161,14 @@ function referenceSimulation(
         remaining: job.remaining,
         level: job.level,
         used: job.used,
+        turn: job.turn,
       })),
     });
     timeline.push(running?.id ?? null);
     if (running) {
       running.remaining -= 1;
       running.used += 1;
+      running.turn += 1;
     }
   }
 
@@ -214,6 +180,7 @@ function referenceSimulation(
       remaining: job.remaining,
       level: job.level,
       used: job.used,
+      turn: job.turn,
     })),
   });
   return { timeline, snapshots };
@@ -297,10 +264,11 @@ function assertScenario(
 
       if (config.algorithm === "mlfq") {
         check(view.queueLevel === referenceView.level, `Wrong MLFQ level for ${definition.id} at boundary ${time}.`);
+        check(view.quantumUsed === referenceView.turn, `Wrong MLFQ turn use for ${definition.id} at boundary ${time}.`);
         check(view.allotmentUsed === referenceView.used, `Wrong MLFQ allotment use for ${definition.id} at boundary ${time}.`);
         check(view.queueLevel >= 0 && view.queueLevel < config.mlfqQuanta.length, `Invalid queue level for ${definition.id} at boundary ${time}.`);
         if (view.state !== "finished") {
-          check(view.allotmentUsed >= 0 && view.allotmentUsed < config.mlfqQuanta[view.queueLevel], `Invalid active allotment for ${definition.id} at boundary ${time}.`);
+          check(view.allotmentUsed >= 0 && view.allotmentUsed < (config.mlfqAllotments ?? config.mlfqQuanta)[view.queueLevel], `Invalid active allotment for ${definition.id} at boundary ${time}.`);
         }
       }
     }
@@ -309,8 +277,9 @@ function assertScenario(
       const running = snapshot.processes.find((process) => process.id === snapshot.running)!;
       check(snapshot.runningRemaining === running.remainingTime, `Running remainder summary is stale at boundary ${time}.`);
       check(snapshot.runningQueueLevel === running.queueLevel, `Running queue summary is stale at boundary ${time}.`);
-      // After a boost, the current lower-level turn is intentionally allowed
-      // to finish while boosted work waits in Q0.
+      if (config.algorithm === "mlfq") {
+        check(snapshot.readyQueues.slice(0, running.queueLevel).flat().length === 0, `Higher priority work waited at boundary ${time}.`);
+      }
     } else {
       check(snapshot.runningRemaining === null, `Idle CPU exposes a running remainder at boundary ${time}.`);
       check(snapshot.runningQueueLevel === null, `Idle CPU exposes a running queue at boundary ${time}.`);
@@ -324,7 +293,7 @@ function assertScenario(
     }
 
     if (config.algorithm === "mlfq" && config.mlfqBoostInterval && time > 0 && time % config.mlfqBoostInterval === 0) {
-      for (const view of snapshot.processes.filter((process) => process.state === "ready")) {
+      for (const view of snapshot.processes.filter((process) => (process.state === "ready" || process.state === "running"))) {
         check(view.queueLevel === 0, `Boost failed to move active process ${view.id} to Q0 at boundary ${time}.`);
         check(view.allotmentUsed === 0, `Boost failed to reset queued process ${view.id} at boundary ${time}.`);
       }
@@ -386,6 +355,7 @@ function randomScenario(
     algorithm,
     quantum: 1 + next(20),
     mlfqQuanta,
+    mlfqAllotments: sample % 3 === 0 ? undefined : mlfqQuanta.map(() => 1 + next(25)),
     mlfqBoostInterval: algorithm === "mlfq" && sample % 13 === 0
       ? undefined
       : 1 + next(100),

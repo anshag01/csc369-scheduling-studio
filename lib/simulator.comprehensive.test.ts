@@ -98,98 +98,51 @@ function referenceMlfqTimeline(
   definitions: ProcessDefinition[],
   quanta: number[],
   boostInterval: number,
+  allotments = quanta,
 ) {
-  const jobs = definitions
-    .map((process, index) => ({
-      ...process,
-      index,
-      remaining: process.serviceTime,
-      level: 0,
-      used: 0,
-      protected: false,
-    }))
-    .sort((left, right) => left.arrivalTime - right.arrivalTime || left.index - right.index);
-  const queues: Array<typeof jobs> = Array.from({ length: quanta.length }, () => []);
-  const result: string[] = [];
-  let running: (typeof jobs)[number] | null = null;
-
-  for (let time = 0; jobs.some((job) => job.remaining > 0); time += 1) {
-    if (running?.remaining === 0) running = null;
-
-    let expired: (typeof jobs)[number] | null = null;
-    let yielded: (typeof jobs)[number] | null = null;
-    if (running) {
-      const allotment = quanta[running.level];
-      if (running.used === allotment) {
-        expired = running;
-        running = null;
-      } else if (running.relinquishEarly && running.used === allotment - 1) {
-        yielded = running;
-        running = null;
+  const jobs = definitions.map((job, index) => ({
+    ...job, index, remaining: job.serviceTime, level: 0, used: 0, turn: 0,
+  })).sort((a, b) => a.arrivalTime - b.arrivalTime || a.index - b.index);
+  const queues: Array<typeof jobs> = quanta.map(() => []);
+  const trace: string[] = [];
+  let cpu: (typeof jobs)[number] | undefined;
+  for (let t = 0; jobs.some((job) => job.remaining > 0); t++) {
+    if (cpu?.remaining === 0) cpu = undefined;
+    let requeue: typeof cpu;
+    if (cpu) {
+      const demote = cpu.used === allotments[cpu.level];
+      const rotate = cpu.turn === quanta[cpu.level];
+      const yieldEarly = cpu.relinquishEarly && quanta[cpu.level] >= 2 && cpu.turn === quanta[cpu.level] - 1;
+      if (demote || rotate || yieldEarly) {
+        requeue = cpu;
+        cpu = undefined;
+        requeue.turn = 0;
+        if (demote) {
+          requeue.used = 0;
+          requeue.level = Math.min(requeue.level + 1, quanta.length - 1);
+        }
       }
     }
-
-    const boostDue = time > 0 && time % boostInterval === 0;
-    if (boostDue) {
-      if (yielded) {
-        yielded.protected = false;
-        queues[yielded.level].push(yielded);
-        yielded = null;
-      }
-      if (expired) {
-        expired.protected = false;
-        expired.used = 0;
-        expired.level = Math.min(expired.level + 1, quanta.length - 1);
-        queues[expired.level].push(expired);
-        expired = null;
-      }
-      const waiting = queues.flat();
+    const boost = t > 0 && t % boostInterval === 0;
+    if (boost) {
+      if (requeue) { queues[requeue.level].push(requeue); requeue = undefined; }
+      const promoted = [...queues.flat(), ...(cpu ? [cpu] : [])];
       queues.forEach((queue) => queue.splice(0));
-      for (const job of waiting) {
-        job.level = 0;
-        job.used = 0;
-        job.protected = false;
-        queues[0].push(job);
-      }
-      if (running) running.protected = running.level > 0;
+      promoted.forEach((job) => { job.level = 0; job.used = 0; job.turn = 0; });
+      queues[0].push(...promoted);
+      cpu = undefined;
     }
-
-    for (const job of jobs) {
-      if (job.arrivalTime === time && job.remaining > 0) {
-        job.level = 0;
-        job.used = 0;
-        queues[0].push(job);
-      }
+    queues[0].push(...jobs.filter((job) => job.arrivalTime === t));
+    if (requeue) queues[requeue.level].push(requeue);
+    if (cpu && queues.slice(0, cpu.level).some((queue) => queue.length)) {
+      queues[cpu.level].unshift(cpu);
+      cpu = undefined;
     }
-    if (yielded) {
-      yielded.protected = false;
-      queues[yielded.level].push(yielded);
-    }
-    if (expired) {
-      expired.protected = false;
-      expired.used = 0;
-      expired.level = Math.min(expired.level + 1, quanta.length - 1);
-      queues[expired.level].push(expired);
-    }
-
-    if (running && !running.protected && queues.slice(0, running.level).some((queue) => queue.length > 0)) {
-      queues[running.level].unshift(running);
-      running = null;
-    }
-    if (!running) {
-      const nextQueue = queues.find((queue) => queue.length > 0);
-      running = nextQueue?.shift() ?? null;
-      if (running) running.protected = false;
-    }
-
-    result.push(running?.id ?? "-");
-    if (running) {
-      running.remaining -= 1;
-      running.used += 1;
-    }
+    cpu ??= queues.find((queue) => queue.length)?.shift();
+    trace.push(cpu?.id ?? "-");
+    if (cpu) { cpu.remaining--; cpu.used++; cpu.turn++; }
   }
-
-  return result.join("");
+  return trace.join("");
 }
 
 function assertSimulationInvariants(
@@ -269,8 +222,9 @@ function assertSimulationInvariants(
       const running = snapshot.processes.find((process) => process.id === snapshot.running)!;
       expect(running.state).toBe("running");
       expect(running.remainingTime).toBeGreaterThan(0);
-      // A lower-level process may intentionally finish its current turn while
-      // newly boosted work waits in Q0.
+      if (simulationConfig.algorithm === "mlfq") {
+        expect(snapshot.readyQueues.slice(0, running.queueLevel).flat()).toEqual([]);
+      }
     }
 
     if (simulationConfig.algorithm === "mlfq") {
@@ -281,14 +235,16 @@ function assertSimulationInvariants(
       });
       for (const process of snapshot.processes.filter((item) => item.state !== "finished")) {
         expect(process.allotmentUsed).toBeGreaterThanOrEqual(0);
-        expect(process.allotmentUsed).toBeLessThan(simulationConfig.mlfqQuanta[process.queueLevel]);
+        expect(process.allotmentUsed).toBeLessThan((simulationConfig.mlfqAllotments ?? simulationConfig.mlfqQuanta)[process.queueLevel]);
+        expect(process.quantumUsed).toBeGreaterThanOrEqual(0);
+        expect(process.quantumUsed).toBeLessThan(simulationConfig.mlfqQuanta[process.queueLevel]);
       }
       if (
         snapshot.time > 0 &&
         simulationConfig.mlfqBoostInterval &&
         snapshot.time % simulationConfig.mlfqBoostInterval === 0
       ) {
-        for (const process of snapshot.processes.filter((item) => item.state === "ready")) {
+        for (const process of snapshot.processes.filter((item) => item.state === "ready" || item.state === "running")) {
           expect(process.queueLevel).toBe(0);
           expect(process.allotmentUsed).toBe(0);
         }
@@ -394,13 +350,15 @@ describe("comprehensive scheduling verification", () => {
       }));
       const quanta = [2 + next(3), 5 + next(3), 8 + next(4)];
       const boostInterval = 3 + next(15);
+      const allotments = quanta.map(() => 1 + next(12));
       const actual = simulate(processes, {
         algorithm: "mlfq",
         quantum: 2,
         mlfqQuanta: quanta,
+        mlfqAllotments: allotments,
         mlfqBoostInterval: boostInterval,
       }).timeline.map((slice) => slice.processId ?? "-").join("");
-      expect(actual).toBe(referenceMlfqTimeline(processes, quanta, boostInterval));
+      expect(actual).toBe(referenceMlfqTimeline(processes, quanta, boostInterval, allotments));
     }
   });
 
@@ -485,7 +443,7 @@ describe("comprehensive scheduling verification", () => {
     );
   });
 
-  it("boosts waiting work without renewing the running turn or duplicating a process", () => {
+  it("boosts all active work with fresh budgets without duplicating a process", () => {
     const simulationConfig: SimulationConfig = {
       algorithm: "mlfq",
       quantum: 2,
@@ -496,7 +454,7 @@ describe("comprehensive scheduling verification", () => {
     const result = simulate(processes, simulationConfig);
     assertSimulationInvariants(processes, simulationConfig);
     expect(result.snapshots[4].events.some((event) =>
-      event.startsWith("Priority boost moved 1 waiting process to Q0"),
+      event.startsWith("Priority boost moved 2 active processes to Q0"),
     )).toBe(true);
     expect(result.snapshots[4].processes.find((process) => process.id === "A")?.state).toBe("finished");
   });

@@ -12,6 +12,8 @@ export type SimulationConfig = {
   algorithm: Algorithm;
   quantum: number;
   mlfqQuanta: number[];
+  /** Omitted by legacy callers: use the queue quanta as allotments. */
+  mlfqAllotments?: number[];
   mlfqBoostInterval?: number;
 };
 
@@ -23,6 +25,7 @@ export type ProcessView = ProcessDefinition & {
   waitingTime: number;
   turnaroundTime: number | null;
   allotmentUsed: number;
+  quantumUsed: number;
 };
 
 export type TransitionAction =
@@ -90,10 +93,10 @@ type RuntimeProcess = ProcessDefinition & {
   remainingTime: number;
   queueLevel: number;
   quantumUsed: number;
+  allotmentUsed: number;
   firstRunTime: number | null;
   completionTime: number | null;
   waitingTime: number;
-  boostProtected: boolean;
 };
 
 const byStableOrder = (a: RuntimeProcess, b: RuntimeProcess) =>
@@ -169,10 +172,8 @@ function explainContinuation(process: RuntimeProcess, queues: RuntimeProcess[][]
     return `${process.id} continues: ${process.quantumUsed}/${config.quantum} quantum ticks used; ${config.quantum - process.quantumUsed} remain in this turn.`;
   }
   if (config.algorithm === "mlfq") {
-    const reason = process.boostProtected
-      ? "the boost preserves its current CPU turn"
-      : "no higher-priority queue is ready";
-    return `${process.id} continues in Q${process.queueLevel}: ${reason} (${process.quantumUsed}/${config.mlfqQuanta[process.queueLevel]} allotment ticks used).`;
+    const allotment = (config.mlfqAllotments ?? config.mlfqQuanta)[process.queueLevel];
+    return `${process.id} continues in Q${process.queueLevel}: no higher-priority queue is ready (${process.quantumUsed}/${config.mlfqQuanta[process.queueLevel]} quantum ticks used; ${process.allotmentUsed}/${allotment} allotment ticks used).`;
   }
   const contender = bestRemaining(queues[0]);
   if (!contender) return `${process.id} continues with ${process.remainingTime} ticks left; no other process is ready.`;
@@ -207,7 +208,8 @@ function makeViews(
           ? null
           : process.firstRunTime - process.arrivalTime,
       waitingTime: process.waitingTime,
-      allotmentUsed: process.quantumUsed,
+      allotmentUsed: process.allotmentUsed,
+      quantumUsed: process.quantumUsed,
       turnaroundTime:
         process.completionTime === null
           ? null
@@ -234,10 +236,11 @@ export function simulate(
       firstRunTime: null,
       completionTime: null,
       waitingTime: 0,
-      boostProtected: false,
+      allotmentUsed: 0,
     }))
     .sort(byStableOrder);
 
+  const allotments = config.mlfqAllotments ?? config.mlfqQuanta;
   const queueCount = config.algorithm === "mlfq" ? config.mlfqQuanta.length : 1;
   const boostInterval =
     config.algorithm === "mlfq" &&
@@ -313,14 +316,14 @@ export function simulate(
       expired = running;
       running = null;
     } else if (running && config.algorithm === "mlfq") {
-      const allotted = config.mlfqQuanta[running.queueLevel];
-      if (running.quantumUsed >= allotted) {
+      const slice = config.mlfqQuanta[running.queueLevel];
+      if (running.allotmentUsed >= allotments[running.queueLevel] || running.quantumUsed >= slice) {
         expired = running;
         running = null;
       } else if (
         running.relinquishEarly &&
-        allotted >= 2 &&
-        running.quantumUsed === allotted - 1
+        slice >= 2 &&
+        running.quantumUsed === slice - 1
       ) {
         yielded = running;
         running = null;
@@ -330,8 +333,8 @@ export function simulate(
     const enqueueYielded = () => {
       if (!yielded) return;
       const process = yielded;
-      const allotted = config.mlfqQuanta[process.queueLevel];
-      process.boostProtected = false;
+      const sliceUsed = process.quantumUsed;
+      process.quantumUsed = 0;
       queues[process.queueLevel].push(process);
       yielded = null;
       addMoves("yield", [{
@@ -343,22 +346,25 @@ export function simulate(
         },
       }]);
       events.push(
-        `${process.id} gave up the CPU one tick early at Q${process.queueLevel}; ${process.quantumUsed}/${allotted} used ticks remain accounted.`,
+        `${process.id} gave up the CPU one tick early at Q${process.queueLevel}; ${process.allotmentUsed}/${allotments[process.queueLevel]} used allotment ticks remain accounted (${sliceUsed} quantum ticks used).`,
       );
     };
 
     const enqueueExpired = () => {
       if (!expired) return;
       const process = expired;
-      process.boostProtected = false;
-      const used = process.quantumUsed;
+      const used = config.algorithm === "mlfq" ? process.allotmentUsed : process.quantumUsed;
       process.quantumUsed = 0;
       if (config.algorithm === "mlfq") {
         const previousLevel = process.queueLevel;
-        process.queueLevel = Math.min(previousLevel + 1, queueCount - 1);
+        const demoted = process.allotmentUsed >= allotments[previousLevel];
+        if (demoted) {
+          process.queueLevel = Math.min(previousLevel + 1, queueCount - 1);
+          process.allotmentUsed = 0;
+        }
         queues[process.queueLevel].push(process);
         expired = null;
-        addMoves("demote", [{
+        addMoves(demoted ? "demote" : "rotate", [{
           processId: process.id,
           from: { place: "cpu" },
           to: {
@@ -367,11 +373,14 @@ export function simulate(
           },
         }]);
         events.push(
-          previousLevel === process.queueLevel
-            ? `${process.id} used its full allotment and returned to Q${process.queueLevel}. ${used}/${config.mlfqQuanta[previousLevel]} ticks used; it stays at the lowest priority with a fresh allotment.`
-            : `${process.id} used its full allotment and moved from Q${previousLevel} to Q${process.queueLevel}. ${used}/${config.mlfqQuanta[previousLevel]} ticks used; ${process.remainingTime} service ticks remain.`,
+          !demoted
+            ? `${process.id}'s quantum expired; it returned to the back of Q${process.queueLevel}, keeping ${used}/${allotments[previousLevel]} allotment ticks used.`
+            : previousLevel === process.queueLevel
+              ? `${process.id} used its full allotment and returned to Q${process.queueLevel}. ${used}/${allotments[previousLevel]} ticks used; it stays at the lowest priority with a fresh allotment.`
+              : `${process.id} used its full allotment and moved from Q${previousLevel} to Q${process.queueLevel}. ${used}/${allotments[previousLevel]} ticks used; ${process.remainingTime} service ticks remain.`,
         );
       } else {
+        process.allotmentUsed = 0;
         queues[0].push(process);
         expired = null;
         addMoves("rotate", [{
@@ -383,10 +392,9 @@ export function simulate(
       }
     };
 
-    // When an MLFQ allotment expires on the exact boost boundary, account for
-    // the expiry and enqueue the process first. The subsequent boost then
-    // moves that queued process to Q0 in the same deterministic order shown by
-    // the visualizer.
+    // Retain expiry/yield-before-boost ordering pending clarification of collisions.
+    // Requeued work participates in queue order; only a still-ongoing runner
+    // is appended after all waiting work. Both counters reset, service does not.
     if (boostDue && config.algorithm === "mlfq") {
       enqueueYielded();
       enqueueExpired();
@@ -394,15 +402,20 @@ export function simulate(
       const boostOrigins = queues.flatMap((queue, level) =>
         queue.map((process, index) => ({ process, from: { place: queuePlace(level), index } as ProcessLocation })),
       );
+      const interrupted = running;
+      if (interrupted) {
+        boostOrigins.push({ process: interrupted, from: { place: "cpu" } });
+        running = null;
+      }
       const boostChangesVisibleState = boostOrigins.some(({ process, from }, index) =>
-        from.place !== "q0" || from.index !== index || process.queueLevel !== 0 || process.quantumUsed !== 0,
+        from.place !== "q0" || from.index !== index || process.queueLevel !== 0 || process.quantumUsed !== 0 || process.allotmentUsed !== 0,
       );
       const boosted = boostOrigins.map(({ process }) => process);
       for (const queue of queues) queue.length = 0;
       for (const process of boosted) {
         process.queueLevel = 0;
         process.quantumUsed = 0;
-        process.boostProtected = false;
+        process.allotmentUsed = 0;
         queues[0].push(process);
       }
       if (boostChangesVisibleState) {
@@ -413,15 +426,13 @@ export function simulate(
         })));
       }
 
-      if (running) {
-        running.boostProtected = running.queueLevel > 0;
-        const allotted = config.mlfqQuanta[running.queueLevel];
+      if (interrupted) {
         events.push(
-          `Priority boost moved ${boosted.length} waiting process${boosted.length === 1 ? "" : "es"} to Q0; ${running.id} remained on the CPU in Q${running.queueLevel} with ${running.quantumUsed}/${allotted} ticks used.`,
+          `Priority boost moved ${boosted.length} active process${boosted.length === 1 ? "" : "es"} to Q0 with fresh quantum and allotment; ${interrupted.id} was preempted and placed after all waiting processes.`,
         );
       } else if (boosted.length > 0) {
         events.push(
-          `Priority boost moved ${boosted.length} waiting process${boosted.length === 1 ? "" : "es"} to Q0.`,
+          `Priority boost moved ${boosted.length} waiting process${boosted.length === 1 ? "" : "es"} to Q0 with fresh quantum and allotment.`,
         );
       }
     }
@@ -432,6 +443,7 @@ export function simulate(
     for (const process of arrivals) {
       process.queueLevel = 0;
       process.quantumUsed = 0;
+      process.allotmentUsed = 0;
       queues[0].push(process);
       addMoves("arrive", [{
         processId: process.id,
@@ -452,6 +464,7 @@ export function simulate(
           `${contender.id} has less remaining time, so ${preempted.id} was preempted. ${contender.remainingTime} < ${preempted.remainingTime} ticks remaining.`,
         );
         preempted.quantumUsed = 0;
+        preempted.allotmentUsed = 0;
         queues[0].push(preempted);
         running = null;
         addMoves("preempt", [{
@@ -462,15 +475,14 @@ export function simulate(
       }
     }
 
-    if (running && config.algorithm === "mlfq" && !running.boostProtected) {
+    if (running && config.algorithm === "mlfq") {
       const higherQueueReady = queues.some(
         (queue, index) => index < running!.queueLevel && queue.length > 0,
       );
       if (higherQueueReady) {
         const preempted = running;
         const higherLevel = queues.findIndex((queue, level) => level < preempted.queueLevel && queue.length > 0);
-        events.push(`${preempted.id} was preempted by a process in a higher-priority queue. ${queues[higherLevel][0].id} is ready in Q${higherLevel}; ${preempted.id} returns to the head of Q${preempted.queueLevel}, keeping ${preempted.quantumUsed}/${config.mlfqQuanta[preempted.queueLevel]} used ticks.`);
-        preempted.boostProtected = false;
+        events.push(`${preempted.id} was preempted by a process in a higher-priority queue. ${queues[higherLevel][0].id} is ready in Q${higherLevel}; ${preempted.id} returns to the head of Q${preempted.queueLevel}, keeping ${preempted.quantumUsed}/${config.mlfqQuanta[preempted.queueLevel]} quantum ticks and ${preempted.allotmentUsed}/${allotments[preempted.queueLevel]} allotment ticks used.`);
         queues[preempted.queueLevel].unshift(preempted);
         running = null;
         addMoves("preempt", [{
@@ -495,7 +507,6 @@ export function simulate(
             break;
           }
         }
-        running.boostProtected = false;
         if (running.firstRunTime === null) running.firstRunTime = time;
         addMoves("dispatch", [{
           processId: running.id,
@@ -537,6 +548,7 @@ export function simulate(
     if (running) {
       running.remainingTime -= 1;
       running.quantumUsed += 1;
+      running.allotmentUsed += 1;
     }
     time += 1;
   }
@@ -581,7 +593,15 @@ export function validateSimulationConfig(config: SimulationConfig): void {
     config.mlfqQuanta.length === 0 ||
     config.mlfqQuanta.some((quantum) => !Number.isSafeInteger(quantum) || quantum < 1)
   ) {
-    throw new RangeError("MLFQ needs at least one queue, each with a positive whole-number allotment.");
+    throw new RangeError("MLFQ needs at least one queue, each with a positive whole-number quantum.");
+  }
+  if (
+    config.mlfqAllotments !== undefined &&
+    (!Array.isArray(config.mlfqAllotments) ||
+      config.mlfqAllotments.length !== config.mlfqQuanta.length ||
+      config.mlfqAllotments.some((allotment) => !Number.isSafeInteger(allotment) || allotment < 1))
+  ) {
+    throw new RangeError("Provide one positive whole-number allotment for each MLFQ queue.");
   }
   if (
     config.mlfqBoostInterval !== undefined &&
