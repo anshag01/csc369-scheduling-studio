@@ -1,6 +1,6 @@
 # Scheduling policy rules
 
-Notes on the five scheduling policies implemented in the visualizer. Every rule has an explanation and a small example. Each document also includes boundary event ordering and a complete worked schedule, with queue tables and CPU timelines where useful.
+Rules for the five scheduling policies implemented in the visualizer. Each rule is followed by an ASCII example showing queue order, a CPU timeline, or a change in process state. Each document also gives the boundary event order and a complete worked schedule.
 
 | Policy | Read the source | Download PDF |
 | --- | --- | --- |
@@ -14,4 +14,4 @@ The final FCFS, SJF, STCF, and RR schedules use the same input for comparison. T
 
 ## Regenerate
 
-Edit the root `*_RULES.md` files, then run `npm run docs:rules`. The generator uses Playwright Chromium (`npx playwright install chromium` if needed). It uses TeX Gyre Pagella when installed, with system serif fallbacks. Tables headed `From`, `To`, and `CPU` render as timelines in the PDFs. Review pagination and figures after editing.
+Edit the root `*_RULES.md` files, then run `npm run docs:rules`. The generator uses Playwright Chromium (`npx playwright install chromium` if needed). Prose uses TeX Gyre Pagella when installed, with system serif fallbacks. ASCII examples use fenced `text` blocks and a monospaced font so spaces, arrows, and queue positions stay aligned in the PDFs. Use spaces rather than tabs. The generator checks diagram width against the printable page; review pagination and diagram placement after editing.

@@ -49,6 +49,16 @@ function render(markdown) {
   for (let i = 0; i < lines.length;) {
     const line = lines[i].trim();
     if (!line) { i++; continue; }
+    if (line === '```text') {
+      const diagram = [];
+      i++;
+      while (i < lines.length && lines[i].trim() !== '```') diagram.push(lines[i++]);
+      if (i === lines.length) throw new Error('Unclosed ASCII diagram.');
+      if (diagram.some(row => /[^\x20-\x7e]/.test(row))) throw new Error('Diagrams must use printable ASCII characters and spaces.');
+      html.push(`<pre class="ascii-diagram"><code>${escape(diagram.join('\n'))}</code></pre>`);
+      i++;
+      continue;
+    }
     if (line.startsWith('# ')) {
       title = line.slice(2);
       html.push(`<h1>${inline(title)}</h1>`); i++; continue;
@@ -90,7 +100,7 @@ function render(markdown) {
     }
     if (/^(#|>|```|<)/.test(line)) throw new Error(`Unsupported Markdown block: ${line}`);
     const paragraph = [];
-    while (i < lines.length && lines[i].trim() && !/^(#|\||- |\d+\. )/.test(lines[i].trim())) paragraph.push(lines[i++].trim());
+    while (i < lines.length && lines[i].trim() && !/^(#|\||```|- |\d+\. )/.test(lines[i].trim())) paragraph.push(lines[i++].trim());
     html.push(`<p>${inline(paragraph.join(' '))}</p>`);
   }
   closeSubsection();
@@ -107,10 +117,12 @@ h2 { margin: 15pt 0 7pt; font-size: 14pt; line-height: 1.25; break-after: avoid;
 h3 { margin: 9pt 0 4pt; font-size: 11pt; line-height: 1.35; break-after: avoid; }
 p { margin: 0 0 6pt; orphans: 3; widows: 3; break-inside: avoid; }
 .rule, .subsection, .worked-example, .boundary-order { break-inside: avoid; }
-h2 + p, p:has(+ ol), p:has(+ ul), p:has(+ figure), p:has(+ table) { break-after: avoid; }
+h2 + p, p:has(+ ol), p:has(+ ul), p:has(+ figure), p:has(+ table), p:has(+ pre) { break-after: avoid; }
 ul, ol { margin: 6pt 0 10pt; padding-left: 20pt; break-inside: avoid; }
 li { margin: 4pt 0; padding-left: 2pt; break-inside: avoid; }
 code { font: 9pt/1.4 "DejaVu Sans Mono", monospace; }
+.ascii-diagram { margin: 8pt 0 10pt; padding: 5pt 0 5pt 10pt; border-left: 0.7pt solid #aaa; white-space: pre; break-inside: avoid; }
+.ascii-diagram code { font: 9.5pt/1.4 "DejaVu Sans Mono", monospace; font-variant-ligatures: none; }
 table { border-collapse: collapse; width: 100%; margin: 12pt 0; border-top: 1pt solid #222; border-bottom: 1pt solid #222; font-size: 10.5pt; line-height: 1.3; break-inside: avoid; }
 th { text-align: left; border-bottom: 0.6pt solid #555; font-weight: normal; font-style: italic; }
 th, td { padding: 4pt 8pt; vertical-align: top; }
@@ -134,6 +146,11 @@ try {
     try {
       await page.setContent(html, { waitUntil: 'load' });
       await page.evaluate(() => document.fonts.ready);
+      // Check diagrams at the actual printable A4 width before producing a PDF.
+      await page.setViewportSize({ width: Math.floor((210 - 46) * 96 / 25.4), height: 1000 });
+      const overflow = await page.locator('.ascii-diagram').evaluateAll(nodes =>
+        nodes.filter(node => node.scrollWidth > node.clientWidth + 1).map(node => node.textContent));
+      if (overflow.length) throw new Error(`${policy}: ASCII diagram exceeds the printable width: ${overflow[0]}`);
       await page.pdf({
         path: path.join(output, `${policy}_Rules.pdf`), format: 'A4', printBackground: true,
         tagged: true, outline: true, displayHeaderFooter: true,
