@@ -108,7 +108,7 @@ test("the running process appears only on the CPU for every policy", async ({ pa
       await expect(page.locator(".cpu-process-copy")).toContainText("1/2 quantum used");
     } else if (algorithm === "mlfq") {
       await expect(cpuProcessCard).toHaveAttribute("data-allotment-used", "1");
-      await expect(cpuProcessCard).toContainText("Q0 · 1/2");
+      await expect(cpuProcessCard.locator(".process-budgets")).toHaveText("Q: 1/2 · A: 1/2");
       await expect(page.locator(".cpu-process-copy")).toContainText("1/2 allotment used");
     }
 
@@ -408,7 +408,7 @@ test("a priority boost preempts a Q0 runner and resets its budgets", async ({ pa
   await expect(page.getByTestId("ready-queue-0")).toHaveAttribute("data-ready-ids", "C");
 });
 
-test("independent queue settings show remaining turn and allotment budgets", async ({ page }) => {
+test("independent queue settings show remaining turn and allotment budgets", async ({ page }, info) => {
   await page.emulateMedia({ reducedMotion: "reduce" });
   await page.locator(".json-panel summary").click();
   await page.getByLabel("Scenario JSON").fill(JSON.stringify({ processes: [
@@ -423,6 +423,8 @@ test("independent queue settings show remaining turn and allotment budgets", asy
   await page.locator('[data-timeline-time="4"]').click();
   await expect(page.getByTestId("cpu-process-card")).toHaveAttribute("data-process-id", "A");
   await expect(page.getByTestId("running-budgets")).toHaveText("Quantum left: 2 · Allotment left: 1");
+  await expect(page.getByTestId("cpu-process-card").locator(".process-budgets")).toHaveText("Q: 0/2 · A: 2/3");
+  await expect(page.getByTestId("ready-queue-0").locator(".process-budgets")).toHaveText("Q: 0/2 · A: 2/3");
   await expect(page.locator(".cpu-process-copy")).toContainText("4 ticks of CPU service remaining");
   await page.getByRole("button", { name: "Metrics", exact: true }).click();
   await expect(page.getByRole("columnheader", { name: "Quantum left" })).toBeVisible();
@@ -430,11 +432,37 @@ test("independent queue settings show remaining turn and allotment budgets", asy
   await page.getByRole("button", { name: "Next time step" }).click();
   await expect(page.getByTestId("event-list")).toContainText("A used its full allotment and moved from Q0 to Q1");
   await expect(page.getByTestId("ready-queue-1")).toHaveAttribute("data-ready-ids", "A");
+  await expect(page.getByTestId("ready-queue-1").locator(".process-budgets")).toHaveText("Q: 0/4 · A: 0/4");
   await page.getByRole("button", { name: "Previous time step" }).click();
   await expect(page.getByTestId("running-budgets")).toHaveText("Quantum left: 2 · Allotment left: 1");
+  await expect(page.getByTestId("cpu-process-card").locator(".process-budgets")).toHaveText("Q: 0/2 · A: 2/3");
+  await expect(page.getByTestId("ready-queue-0").locator(".process-budgets")).toHaveText("Q: 0/2 · A: 2/3");
+  await info.attach("independent-card-budgets", { body: await page.screenshot({ fullPage: true }), contentType: "image/png" });
   await page.getByRole("spinbutton", { name: "Q0 quantum", exact: true }).fill("1");
   await expect(page.getByTestId("time-value")).toHaveText("0");
   await expect(page.getByRole("spinbutton", { name: "Q0 allotment", exact: true })).toHaveValue("3");
+  await expect(page.locator(".budget-legend")).toBeVisible();
+  await page.getByRole("spinbutton", { name: "Q0 quantum", exact: true }).fill("300");
+  await page.getByRole("spinbutton", { name: "Q0 allotment", exact: true }).fill("400");
+  await expect(page.getByTestId("cpu-process-card").locator(".process-budgets")).toHaveText("Q: 0/300 · A: 0/400");
+  await expect(page.getByTestId("ready-queue-0").locator(".process-budgets")).toHaveText("Q: 0/300 · A: 0/400");
+  const cards = await page.locator(".dashboard-grid [data-motion-id]").evaluateAll((nodes) => nodes.map((node) => {
+    const rect = node.getBoundingClientRect();
+    const budgets = node.querySelector<HTMLElement>(".process-budgets")!;
+    return { width: rect.width, height: rect.height, clipped: budgets.scrollWidth > budgets.clientWidth + 1 };
+  }));
+  expect(cards).toHaveLength(2);
+  expect(cards[0]).toEqual(cards[1]);
+  expect(cards.every((card) => !card.clipped)).toBe(true);
+  const detailsFit = await page.locator(".cpu-card").evaluate((cpu) => {
+    const bounds = cpu.getBoundingClientRect();
+    return [...cpu.querySelectorAll(".cpu-process-copy > *")].every((detail) => {
+      const rect = detail.getBoundingClientRect();
+      return rect.left >= bounds.left && rect.right <= bounds.right - 5 && rect.bottom <= bounds.bottom - 5;
+    });
+  });
+  expect(detailsFit).toBe(true);
+  await info.attach("multi-digit-card-budgets", { body: await page.screenshot({ fullPage: true }), contentType: "image/png" });
 });
 
 test("invalid edits never leave stale visualization data on screen", async ({ page }) => {

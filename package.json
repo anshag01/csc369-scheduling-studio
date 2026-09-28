@@ -17,8 +17,9 @@
     "test:e2e": "playwright test",
     "test": "npm run test:unit && npm run test:stress && npm run build && npm run test:rendered",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
-    "lint:ci": "eslint app lib tests vitest.config.ts vitest.stress.config.ts playwright.config.ts",
-    "db:generate": "drizzle-kit generate"
+    "lint:ci": "eslint app lib tests vitest.config.ts vitest.stress.config.ts playwright.config.ts playwright.mlfq-audit.config.ts",
+    "db:generate": "drizzle-kit generate",
+    "test:e2e:audit": "playwright test --config playwright.mlfq-audit.config.ts"
   },
   "dependencies": {
     "drizzle-orm": "0.45.2",

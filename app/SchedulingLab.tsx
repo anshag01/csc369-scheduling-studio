@@ -55,6 +55,17 @@ function mean(values: number[]) {
   return Number.isInteger(value) ? String(value) : value.toFixed(1);
 }
 
+function MlfqCardBudgets({ quantumUsed, quantum, allotmentUsed, allotment }: {
+  quantumUsed: number;
+  quantum: number;
+  allotmentUsed: number;
+  allotment: number;
+}) {
+  return <small className="process-budgets" title={`Quantum: ${quantumUsed} of ${quantum} ticks used this turn; allotment: ${allotmentUsed} of ${allotment} ticks used at this priority.`}>
+    Q: {quantumUsed}/{quantum} · A: {allotmentUsed}/{allotment}
+  </small>;
+}
+
 export type SchedulingLabProps = {
   initialProcesses?: ProcessDefinition[];
   initialAlgorithm?: Algorithm;
@@ -236,6 +247,13 @@ export default function SchedulingLab({
   const motionFrame = snapshot
     ? `${snapshot.time}:${snapshot.running ?? "idle"}:${snapshot.readyQueues.map((queue) => queue.join(".")).join("|")}`
     : "invalid";
+  // Reserve one consistent card width for every queue and the CPU. Budget
+  // counters can grow to their totals during an animation, so size for both.
+  const mlfqCardWidth = Math.max(120, ...mlfqQuanta.map((quantum, level) => {
+    const allotment = mlfqAllotments[level];
+    const longestBudget = `Q: ${quantum}/${quantum} · A: ${allotment}/${allotment}`;
+    return longestBudget.length * 6 + 18; // 10px monospace text plus padding/borders.
+  }));
   const motionDuration = speed === 2000 ? 1800 : speed === 1400 ? 1200 : 650;
   useTypedProcessMotion(
     dashboardRef,
@@ -314,7 +332,7 @@ export default function SchedulingLab({
             <div className="keyboard-hint"><kbd>←</kbd><kbd>→</kbd> step <kbd>space</kbd> play</div>
           </div>
           {!snapshot ? <div className="empty-state"><span>!</span><h2>Check the scenario</h2><p>{validationError}</p></div> : <>
-            <div ref={dashboardRef} className={`dashboard-grid ${algorithm === "mlfq" ? "mlfq-dashboard" : ""} ${showMetrics ? "metrics-visible" : "metrics-hidden"}`} data-snapshot-time={snapshot.time} data-running-process={displayState?.running ?? ""} data-running-remaining={displayState?.runningRemaining ?? ""} data-motion-duration={motionDuration} data-motion-status={motionBusy ? "playing" : "idle"}>
+            <div ref={dashboardRef} className={`dashboard-grid ${algorithm === "mlfq" ? "mlfq-dashboard" : ""} ${showMetrics ? "metrics-visible" : "metrics-hidden"}`} style={algorithm === "mlfq" ? { "--process-card-width": `${mlfqCardWidth}px` } as React.CSSProperties : undefined} data-snapshot-time={snapshot.time} data-running-process={displayState?.running ?? ""} data-running-remaining={displayState?.runningRemaining ?? ""} data-motion-duration={motionDuration} data-motion-status={motionBusy ? "playing" : "idle"}>
             <div className="status-grid">
               <article className="cpu-card" data-running-process={displayState?.running ?? ""} data-running-queue={displayState?.runningQueueLevel ?? ""}><div className="card-label"><span className="live-dot" />CPU · RUNNING</div>
                 {runningProcess && runningView ? <div className="running-content" data-motion-cpu-target><div
@@ -333,7 +351,7 @@ export default function SchedulingLab({
                 >
                   <strong>{runningView.id}</strong>
                   <span>{runningView.remainingTime} left</span>
-                  {algorithm === "mlfq" && <small>Q{runningView.queueLevel} · {runningView.allotmentUsed}/{mlfqAllotments[runningView.queueLevel]}</small>}
+                  {algorithm === "mlfq" && <MlfqCardBudgets quantumUsed={runningView.quantumUsed} quantum={mlfqQuanta[runningView.queueLevel]} allotmentUsed={runningView.allotmentUsed} allotment={mlfqAllotments[runningView.queueLevel]} />}
                   {algorithm === "rr" && <small>{runningView.quantumUsed}/{quantum} slice</small>}
                   {algorithm === "mlfq" && <i className="allotment-meter" aria-hidden="true"><b style={{ width: `${runningView.allotmentUsed / mlfqAllotments[runningView.queueLevel] * 100}%` }} /></i>}
                 </div><div className="cpu-process-copy"><p>Executing now</p><h2>Process {runningProcess.id}</h2><span>{runningView.remainingTime} tick{runningView.remainingTime === 1 ? "" : "s"} of CPU service remaining</span>{algorithm === "mlfq" && <><small>Q{runningView.queueLevel} · {runningView.allotmentUsed}/{mlfqAllotments[runningView.queueLevel]} allotment used</small><small data-testid="running-budgets">Quantum left: {mlfqQuanta[runningView.queueLevel] - runningView.quantumUsed} · Allotment left: {mlfqAllotments[runningView.queueLevel] - runningView.allotmentUsed}</small></>}{algorithm === "rr" && <small>{runningView.quantumUsed}/{quantum} quantum used</small>}</div></div> : <div className="idle-content" data-motion-cpu-target><div className="process-orb idle">—</div><div><p>Nothing dispatched</p><h2>CPU idle</h2><span>Waiting for work</span></div></div>}
@@ -343,14 +361,14 @@ export default function SchedulingLab({
               <article className="event-card"><div className="card-label">AT THIS TIME BOUNDARY · t={snapshot.time}</div><div className="event-list" data-testid="event-list" data-event-count={snapshot.events.length}>{snapshot.events.length ? snapshot.events.map((event, index) => <p key={index}><span>{index + 1}</span>{event}</p>) : <p className="muted-event">No scheduling decision was needed.</p>}</div></article>
             </div>
 
-            <section className="queue-section card-surface"><div className="card-title-row"><div><p className="eyebrow">READY STATE</p><h2>{algorithm === "mlfq" ? "Ready queues" : "Ready queue"}</h2></div><div className="queue-summary"><span data-testid="state-counts" data-new-count={futureCount} data-ready-count={waitingCount} data-finished-count={completedCount}><b data-motion-future-target>{futureCount} future</b> · {waitingCount} waiting</span>{algorithm === "mlfq" && <div className="boost-countdown" title={`All active processes return to Q0 in ${boostTicksRemaining} ticks`}><i className="boost-ring" style={{ "--boost-progress": `${boostProgress}%` } as React.CSSProperties}><b>{boostTicksRemaining}</b></i><span><strong>NEXT BOOST</strong><small>ticks remaining</small></span></div>}</div></div>
+            <section className="queue-section card-surface"><div className="card-title-row"><div><p className="eyebrow">READY STATE</p><div className="queue-heading"><h2>{algorithm === "mlfq" ? "Ready queues" : "Ready queue"}</h2>{algorithm === "mlfq" && <p className="budget-legend">Q: quantum · A: allotment · used/total</p>}</div></div><div className="queue-summary"><span data-testid="state-counts" data-new-count={futureCount} data-ready-count={waitingCount} data-finished-count={completedCount}><b data-motion-future-target>{futureCount} future</b> · {waitingCount} waiting</span>{algorithm === "mlfq" && <div className="boost-countdown" title={`All active processes return to Q0 in ${boostTicksRemaining} ticks`}><i className="boost-ring" style={{ "--boost-progress": `${boostProgress}%` } as React.CSSProperties}><b>{boostTicksRemaining}</b></i><span><strong>NEXT BOOST</strong><small>ticks remaining</small></span></div>}</div></div>
               <div className={algorithm === "mlfq" ? "multi-queues" : "single-queue"}>{displayState?.readyQueues.map((queue, queueIndex) => {
                 const allotted = mlfqAllotments[queueIndex];
                 return <div className="queue-row" key={queueIndex}>
                   {algorithm === "mlfq" && <div className="queue-label"><div><strong>Q{queueIndex}</strong><span>{queueIndex === 0 ? "Highest" : queueIndex === (displayState?.readyQueues.length ?? 0) - 1 ? "Lowest" : "Medium"} priority</span></div><span>Quantum: {mlfqQuanta[queueIndex]}</span><span>Allotment: {mlfqAllotments[queueIndex]}</span>{queueIndex < (displayState?.readyQueues.length ?? 0) - 1 && <i className="demotion-cue">full allotment ↓</i>}</div>}
                   <div className="queue-track" data-testid={`ready-queue-${queueIndex}`} data-ready-ids={queue.join(",")}>
                     <span className="queue-head">HEAD</span>
-                    {queue.length === 0 ? <span className="empty-queue">Queue empty</span> : queue.map((id) => { const process = processById.get(id)!; const view = displayState?.processes.find((item) => item.id === id); const used = view?.allotmentUsed ?? 0; return <div className={`queue-chip ${algorithm === "mlfq" ? "mlfq-queue-chip" : ""}`} data-process-id={id} data-state="ready" data-remaining={view?.remainingTime} data-quantum-used={algorithm === "mlfq" ? view?.quantumUsed : undefined} data-allotment-used={algorithm === "mlfq" ? used : undefined} data-motion-id={id} data-motion-place={algorithm === "mlfq" ? `q${queueIndex}` : "ready"} data-motion-color={process.color} key={id} style={{ "--process-color": process.color } as React.CSSProperties} title={algorithm === "mlfq" ? `${id}: ${mlfqQuanta[queueIndex] - (view?.quantumUsed ?? 0)} quantum ticks left; ${allotted - used} allotment ticks left at Q${queueIndex}` : undefined}><strong>{id}</strong><span>{view?.remainingTime} left</span>{algorithm === "mlfq" && <small>{used}/{allotted} used</small>}{algorithm === "mlfq" && <i className="allotment-meter" aria-hidden="true"><b style={{ width: `${used / allotted * 100}%` }} /></i>}</div>; })}
+                    {queue.length === 0 ? <span className="empty-queue">Queue empty</span> : queue.map((id) => { const process = processById.get(id)!; const view = displayState?.processes.find((item) => item.id === id); const used = view?.allotmentUsed ?? 0; return <div className={`queue-chip ${algorithm === "mlfq" ? "mlfq-queue-chip" : ""}`} data-process-id={id} data-state="ready" data-remaining={view?.remainingTime} data-quantum-used={algorithm === "mlfq" ? view?.quantumUsed : undefined} data-allotment-used={algorithm === "mlfq" ? used : undefined} data-motion-id={id} data-motion-place={algorithm === "mlfq" ? `q${queueIndex}` : "ready"} data-motion-color={process.color} key={id} style={{ "--process-color": process.color } as React.CSSProperties} title={algorithm === "mlfq" ? `${id}: ${mlfqQuanta[queueIndex] - (view?.quantumUsed ?? 0)} quantum ticks left; ${allotted - used} allotment ticks left at Q${queueIndex}` : undefined}><strong>{id}</strong><span>{view?.remainingTime} left</span>{algorithm === "mlfq" && <MlfqCardBudgets quantumUsed={view?.quantumUsed ?? 0} quantum={mlfqQuanta[queueIndex]} allotmentUsed={used} allotment={allotted} />}{algorithm === "mlfq" && <i className="allotment-meter" aria-hidden="true"><b style={{ width: `${used / allotted * 100}%` }} /></i>}</div>; })}
                     <span className="queue-tail">TAIL</span>
                   </div>
                 </div>;

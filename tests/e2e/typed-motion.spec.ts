@@ -13,7 +13,7 @@ type PhaseObservation = {
   cpu: string;
   queues: string[];
   newCount: string;
-  travelers: Array<{ id: string; from: string; to: string; rect: DOMRect }>;
+  travelers: Array<{ id: string; from: string; to: string; budgets: string | null; clippedBudgets: boolean; rect: DOMRect }>;
   cards: Array<{ id: string; rect: DOMRect }>;
 };
 
@@ -37,6 +37,8 @@ async function expectPhase(page: Page, action: string, index: number, count: num
         id: traveler.dataset.processId ?? "",
         from: traveler.dataset.motionFrom ?? "",
         to: traveler.dataset.motionTo ?? "",
+        budgets: traveler.querySelector(".process-budgets")?.textContent?.trim() ?? null,
+        clippedBudgets: [...traveler.querySelectorAll<HTMLElement>(".process-budgets")].some((label) => label.scrollWidth > label.clientWidth + 1),
         rect: traveler.getBoundingClientRect().toJSON(),
       })),
       cards: [...document.querySelectorAll<HTMLElement>("[data-motion-id]")].map((card) => ({
@@ -606,7 +608,7 @@ test("a boost moves the running process to Q0 and reverse stepping restores its 
   const boost = await expectPhase(page, "boost", 0, 2);
   expect(boost.cpu).toBe("");
   expect(boost.queues).toEqual(["B,A", "", ""]);
-  expect(boost.travelers.find((traveler) => traveler.id === "A")).toMatchObject({ from: "cpu", to: "q0" });
+  expect(boost.travelers.find((traveler) => traveler.id === "A")).toMatchObject({ from: "cpu", to: "q0", budgets: "Q: 2/4 · A: 2/4", clippedBudgets: false });
   await expectPhase(page, "dispatch", 1, 2);
   await expect(page.locator(".dashboard-grid")).toHaveAttribute("data-motion-status", "idle");
   await expect(page.getByTestId("cpu-process-card")).toHaveAttribute("data-process-id", "B");
@@ -614,7 +616,7 @@ test("a boost moves the running process to Q0 and reverse stepping restores its 
   await page.getByRole("button", { name: "Previous time step" }).click();
   await expectPhase(page, "dispatch", 0, 2);
   const reverse = await expectPhase(page, "boost", 1, 2);
-  expect(reverse.travelers.find((traveler) => traveler.id === "A")).toMatchObject({ from: "q0", to: "cpu" });
+  expect(reverse.travelers.find((traveler) => traveler.id === "A")).toMatchObject({ from: "q0", to: "cpu", budgets: "Q: 0/1 · A: 0/1", clippedBudgets: false });
   await expect(page.locator(".dashboard-grid")).toHaveAttribute("data-motion-status", "idle");
   await expect(page.getByTestId("cpu-process-card")).toHaveAttribute("data-process-id", "A");
   await expect(page.getByTestId("cpu-process-card")).toHaveAttribute("data-queue-level", "1");
@@ -633,14 +635,14 @@ test("MLFQ quantum rotation stays in the same queue and reverses with its budget
   await page.getByRole("button", { name: "Next time step" }).click();
   const rotation = await expectPhase(page, "rotate", 0, 2);
   expect(rotation.queues).toEqual(["B,A", "", ""]);
-  expect(rotation.travelers[0]).toMatchObject({ id: "A", from: "cpu", to: "q0" });
+  expect(rotation.travelers[0]).toMatchObject({ id: "A", from: "cpu", to: "q0", budgets: "Q: 1/1 · A: 1/4", clippedBudgets: false });
   await expectPhase(page, "dispatch", 1, 2);
   await expect(page.locator(".dashboard-grid")).toHaveAttribute("data-motion-status", "idle");
   await expect(page.locator('.queue-track [data-process-id="A"]')).toHaveAttribute("data-allotment-used", "1");
   await page.getByRole("button", { name: "Previous time step" }).click();
   await expectPhase(page, "dispatch", 0, 2);
   const undo = await expectPhase(page, "rotate", 1, 2);
-  expect(undo.travelers[0]).toMatchObject({ id: "A", from: "q0", to: "cpu" });
+  expect(undo.travelers[0]).toMatchObject({ id: "A", from: "q0", to: "cpu", budgets: "Q: 0/1 · A: 1/4", clippedBudgets: false });
   await expect(page.locator(".dashboard-grid")).toHaveAttribute("data-motion-status", "idle");
   await expect(page.getByTestId("cpu-process-card")).toHaveAttribute("data-allotment-used", "0");
 });

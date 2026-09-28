@@ -164,6 +164,8 @@ kbd { padding: 2px 4px; color: #5d5d58; background: #f1f1ee; border: 1px solid #
 .queue-chip strong { display: block; font: 500 13px/1.1 var(--font-dm-mono), monospace; white-space: nowrap; }
 .queue-chip span { display: block; color: var(--muted); font: 11px/1.15 var(--font-dm-mono), monospace; white-space: nowrap; }
 .queue-chip small { display: block; margin-top: 1px; color: #5f6c80; font: 10px/1.1 var(--font-dm-mono), monospace; white-space: nowrap; }
+.queue-heading { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; }
+.budget-legend { margin: 0; color: var(--muted); font-size: 10px; line-height: 1.2; }
 .queue-chip.mlfq-queue-chip { min-width: var(--process-card-width); }
 .queue-chip.mlfq-queue-chip span { white-space: nowrap; }
 .allotment-meter { height: 3px; display: block; margin-top: 4px; overflow: hidden; background: #e6e8ef; border-radius: 999px; }
@@ -356,6 +358,8 @@ footer { display: flex; justify-content: space-between; gap: 16px; padding: 13px
 .cpu-process-copy p, .cpu-process-copy h2 { margin: 0; line-height: 1.25; }
 .cpu-process-copy > span { display: block; line-height: 1.4; }
 .cpu-process-copy small { margin-top: 0; line-height: 1.3; }
+.mlfq-dashboard .cpu-process-copy { row-gap: 1px; }
+.mlfq-dashboard .cpu-process-copy small { line-height: 1.1; }
 @media (min-width: 1001px) and (min-height: 600px) {
   .cpu-card > .completion-dock { top: 8px; right: 12px; transform: none; min-width: 108px; height: 26px; padding: 2px 6px; }
   .completion-dock > i { width: 18px; height: 18px; }
