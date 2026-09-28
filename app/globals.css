@@ -142,7 +142,7 @@ kbd { padding: 2px 4px; color: #5d5d58; background: #f1f1ee; border: 1px solid #
 .boost-ring { --boost-progress: 0%; position: relative; width: 30px; height: 30px; flex: 0 0 auto; display: grid; place-items: center; background: conic-gradient(var(--accent) var(--boost-progress), #dfe2ec 0); border-radius: 50%; font-style: normal; }
 .boost-ring::after { content: ""; position: absolute; inset: 4px; background: var(--panel); border-radius: 50%; }
 .boost-ring b { position: relative; z-index: 1; color: var(--ink); font: 500 12px var(--font-dm-mono), monospace; }
-.boost-countdown > span { display: grid; line-height: 1.2; }
+.boost-countdown > span { display: grid; line-height: 1.2; white-space: nowrap; }
 .boost-countdown strong { color: #4a5fb7; font: 500 11px var(--font-dm-mono), monospace; letter-spacing: .06em; }
 .boost-countdown small { margin-top: 2px; color: var(--muted); font-size: 11px; }
 .queue-row { display: grid; grid-template-columns: 124px minmax(0, 1fr); gap: 12px; align-items: stretch; }
@@ -395,6 +395,7 @@ footer { display: flex; justify-content: space-between; gap: 16px; padding: 13px
   .dashboard-grid { display: block; }
   .status-grid { grid-template-columns: 1fr; }
   .dashboard-grid .card-surface { margin-top: 16px; }
+  .queue-section .card-title-row, .queue-summary { flex-wrap: wrap; }
 }
 @media (max-width: 980px) {
   .workspace { grid-template-columns: 310px minmax(0, 1fr); }
