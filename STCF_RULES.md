@@ -6,7 +6,7 @@ STCF runs the process with the least CPU work left. Unlike SJF, it can interrupt
 
 The visualizer uses one CPU, whole ticks, and CPU-only processes. **Remaining service** is the number of CPU ticks a process still needs. It starts at the input service time and decreases by one for each tick the process runs. Switching processes takes no time.
 
-A process can run only after it arrives. Work already completed is preserved when the process is interrupted.
+A process can run only after it arrives. A ready process is waiting for the CPU; a future process has not arrived yet. Work already completed is preserved when a process is interrupted. Queue lists show insertion order. The short examples under the rules are separate scenarios.
 
 ## 2. Scheduling rules
 
@@ -14,29 +14,53 @@ A process can run only after it arrives. Work already completed is preserved whe
 
 When the CPU is free, compare all ready processes and choose the one with the least remaining service. Use what remains now, not the original service time.
 
-For example, A may have started with ten ticks but have only two left. If B still needs three, A is the shorter choice.
+**Explanation.** A partially completed process may be shorter than a newly arrived one, even if it originally needed more CPU time. Selection searches the whole ready queue rather than taking its first entry.
+
+**Example.** A originally needed ten ticks and has already received eight before being preempted. At the next dispatch, A has two ticks left and B has three. Select A. Its original ten-tick service is no longer the quantity being compared.
 
 ### Rule 2. Preempt only for a strictly shorter process
 
 If a ready process has less remaining service than the current process, interrupt the current process and select the shortest ready alternative. If their remaining times are equal, keep the current process running.
 
-If A has three ticks left and B arrives needing three, A continues. If B needs two instead, B preempts A. There is no quantum that forces processes to take turns.
+**Explanation.** First charge the tick that just ran, then compare the updated remaining times. Equality does not cause a switch. STCF has no quantum that forces equally short processes to alternate.
+
+**Example.** A starts at time 0 needing five ticks. At time 2, it has three ticks left. Consider two separate arrivals for B:
+
+| B's service at time 2 | Comparison | Decision |
+| --- | --- | --- |
+| 3 ticks | 3 equals A's 3 | A continues |
+| 2 ticks | 2 is less than A's 3 | B preempts A |
 
 ### Rule 3. Preserve work when a process is preempted
 
 Append the interrupted process to the ready-queue tail without changing its remaining service. When selected again, it resumes from that amount.
 
-The queue is displayed in insertion order. Selection still searches the whole queue, so returning to the tail does not mean waiting for every process ahead of it.
+**Explanation.** Preemption pauses a process; it does not restart its job. Returning to the queue tail also does not force it to wait for every entry ahead of it, because STCF still selects by remaining service.
+
+**Example.** A and C arrive at time 0 needing six and eight ticks. At time 2, A has four left and C is waiting. B arrives needing one tick and preempts A. After B is dispatched, the queue is [C, A]. When B finishes at time 3, select A's four remaining ticks ahead of C's eight. A resumes with four, not six.
 
 ### Rule 4. Break dispatch ties by arrival, then input order
 
 When the CPU is free and several processes share the shortest remaining time, choose the earlier arrival. If arrivals also match, choose the one listed first in the input.
 
-This tie rule applies to dispatch. It does not displace an equally short process that is already running; Rule 2 keeps that process on the CPU.
+**Explanation.** These tie-breakers apply when choosing a process for a free CPU. They do not displace an equally short process already running; Rule 2 keeps that process on the CPU.
+
+**Example.** At a dispatch boundary, B and C each have three ticks left. B arrived at time 1 and C at time 2, so select B. If two tied processes also arrived together, input order decides: Z listed before A is selected before A. Alphabetical order is irrelevant.
 
 ### Rule 5. Complete at zero; idle only if nothing is ready
 
 Remove a process when its remaining service reaches zero. Another process may start at that same boundary. If none is ready, wait for the next arrival. Stop after all processes finish.
+
+**Explanation.** A completed process is removed before comparing candidates. If no candidate exists, the CPU stays idle until an arrival supplies one. There is no additional tick for completion or dispatch.
+
+**Example.** A arrives at time 0 needing two ticks. B arrives at time 4 needing one, and C at time 5 needing one. A finishes at time 2; the CPU is idle until B arrives. B finishes at time 5, exactly when C arrives, so C runs immediately and completes at time 6.
+
+| From | To | CPU |
+| --- | --- | --- |
+| 0 | 2 | A |
+| 2 | 4 | Idle |
+| 4 | 5 | B |
+| 5 | 6 | C |
 
 ## 3. Events at a tick boundary
 
@@ -48,6 +72,8 @@ After accounting for the preceding tick:
 4. If the CPU is free, select the shortest remaining service, using Rule 4 for ties.
 
 All simultaneous arrivals are considered before selecting a process. New arrivals enter the queue before an interrupted process is appended.
+
+In Rule 3's example, C is already waiting when B arrives. Before dispatch, the queue becomes [C, B, A]: B is admitted first, then the preempted A is appended. B is selected from the middle because it has the least remaining service.
 
 ## 4. Worked example
 

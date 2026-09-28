@@ -56,7 +56,9 @@ function render(markdown) {
     if (line.startsWith('## ')) {
       closeSubsection();
       if (sectionOpen) html.push('</section>');
-      html.push(`<section${line.includes('Worked example') ? ' class="worked-example"' : ''}><h2>${inline(line.slice(3))}</h2>`);
+      const sectionClass = line.includes('Worked example') ? 'worked-example'
+        : line.includes('Events at a tick boundary') ? 'boundary-order' : '';
+      html.push(`<section${sectionClass ? ` class="${sectionClass}"` : ''}><h2>${inline(line.slice(3))}</h2>`);
       sectionOpen = true; i++; continue;
     }
     if (line.startsWith('### ')) {
@@ -104,7 +106,7 @@ h1 { margin: 0 0 14pt; font-size: 23pt; line-height: 1.18; font-weight: normal; 
 h2 { margin: 15pt 0 7pt; font-size: 14pt; line-height: 1.25; break-after: avoid; }
 h3 { margin: 9pt 0 4pt; font-size: 11pt; line-height: 1.35; break-after: avoid; }
 p { margin: 0 0 6pt; orphans: 3; widows: 3; break-inside: avoid; }
-.rule, .subsection, .worked-example { break-inside: avoid; }
+.rule, .subsection, .worked-example, .boundary-order { break-inside: avoid; }
 h2 + p, p:has(+ ol), p:has(+ ul), p:has(+ figure), p:has(+ table) { break-after: avoid; }
 ul, ol { margin: 6pt 0 10pt; padding-left: 20pt; break-inside: avoid; }
 li { margin: 4pt 0; padding-left: 2pt; break-inside: avoid; }

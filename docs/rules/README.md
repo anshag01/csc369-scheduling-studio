@@ -1,6 +1,6 @@
 # Scheduling policy rules
 
-Notes on the five scheduling policies implemented in the visualizer. Each document includes the rules, event ordering, and worked examples.
+Notes on the five scheduling policies implemented in the visualizer. Every rule has an explanation and a small example. Each document also includes boundary event ordering and a complete worked schedule, with queue tables and CPU timelines where useful.
 
 | Policy | Read the source | Download PDF |
 | --- | --- | --- |
@@ -10,7 +10,7 @@ Notes on the five scheduling policies implemented in the visualizer. Each docume
 | RR: Round Robin | [RR rules](../../RR_RULES.md) | [RR PDF](RR_Rules.pdf) |
 | MLFQ: Multilevel Feedback Queue | [MLFQ rules](../../MLFQ_RULES.md) | [MLFQ PDF](MLFQ_Rules.pdf) |
 
-FCFS, SJF, STCF, and RR use the same input for comparison. MLFQ includes separate-budget and boost examples.
+The final FCFS, SJF, STCF, and RR schedules use the same input for comparison. The examples beneath individual rules are separate scenarios. MLFQ includes separate-budget examples, ordinary preemption, and boosts that coincide with budget expiry or completion.
 
 ## Regenerate
 
