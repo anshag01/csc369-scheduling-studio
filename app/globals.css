@@ -311,7 +311,8 @@ footer { display: flex; justify-content: space-between; gap: 16px; padding: 13px
   .running-allotment { height: 3px; margin-top: 5px; }
   .running-allotment > small { display: none; }
   .event-list { gap: 4px; margin-top: 8px; }
-  .event-card { display: flex; flex-direction: column; overflow: hidden; }
+  /* Let CPU details size the status row; boundary messages scroll within it. */
+  .event-card { display: flex; flex-direction: column; overflow: hidden; contain: size; }
   .event-card .event-list { min-height: 0; flex: 1; padding-right: 3px; overflow-y: auto; }
   .event-list p { gap: 6px; font-size: 11px; line-height: 1.25; }
   .event-list p > span { width: 15px; height: 15px; font-size: 9px; }

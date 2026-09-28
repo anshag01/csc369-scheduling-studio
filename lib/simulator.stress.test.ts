@@ -90,7 +90,7 @@ function referenceSimulation(
       running = null;
       pending.used = 0;
       pending.turn = 0;
-    } else if (running && config.algorithm === "mlfq") {
+    } else if (running && config.algorithm === "mlfq" && !boostDue) {
       const budget = (config.mlfqAllotments ?? config.mlfqQuanta)[running.level];
       const slice = config.mlfqQuanta[running.level];
       const demote = running.used >= budget;
@@ -105,7 +105,6 @@ function referenceSimulation(
       }
     }
     if (boostDue) {
-      if (pending) { queues[pending.level].push(pending); pending = null; }
       const active = queues.flat();
       if (running) active.push(running);
       queues.forEach((queue) => { queue.length = 0; });
@@ -293,9 +292,17 @@ function assertScenario(
     }
 
     if (config.algorithm === "mlfq" && config.mlfqBoostInterval && time > 0 && time % config.mlfqBoostInterval === 0) {
+      const before = snapshot.transitionStart;
+      const expectedBoostOrder = before.readyQueues.flat();
+      if (before.running && before.runningRemaining! > 0) expectedBoostOrder.push(before.running);
+      expectedBoostOrder.push(...definitions.filter((job) => job.arrivalTime === time).map((job) => job.id));
+      same([...(snapshot.running ? [snapshot.running] : []), ...snapshot.readyQueues[0]], expectedBoostOrder,
+        `Boost must place the unfinished runner after waiting queues and before arrivals at boundary ${time}.`);
+      check(!snapshot.transitions.some((phase) => ["demote", "rotate", "yield"].includes(phase.action)),
+        `A boost boundary must not expose an intermediate expiry or yield phase at ${time}.`);
       for (const view of snapshot.processes.filter((process) => (process.state === "ready" || process.state === "running"))) {
         check(view.queueLevel === 0, `Boost failed to move active process ${view.id} to Q0 at boundary ${time}.`);
-        check(view.allotmentUsed === 0, `Boost failed to reset queued process ${view.id} at boundary ${time}.`);
+        check(view.allotmentUsed === 0 && view.quantumUsed === 0, `Boost failed to reset both budgets for ${view.id} at boundary ${time}.`);
       }
     }
 

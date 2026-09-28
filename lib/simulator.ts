@@ -315,7 +315,7 @@ export function simulate(
     ) {
       expired = running;
       running = null;
-    } else if (running && config.algorithm === "mlfq") {
+    } else if (running && config.algorithm === "mlfq" && !boostDue) {
       const slice = config.mlfqQuanta[running.queueLevel];
       if (running.allotmentUsed >= allotments[running.queueLevel] || running.quantumUsed >= slice) {
         expired = running;
@@ -392,13 +392,10 @@ export function simulate(
       }
     };
 
-    // Retain expiry/yield-before-boost ordering pending clarification of collisions.
-    // Requeued work participates in queue order; only a still-ongoing runner
-    // is appended after all waiting work. Both counters reset, service does not.
+    // Completion wins; a boost then takes precedence over expiry or early yield.
+    // Collect waiting queues first and append the unfinished runner last, even
+    // when its budget expired this tick. Reset both counters, preserving service.
     if (boostDue && config.algorithm === "mlfq") {
-      enqueueYielded();
-      enqueueExpired();
-
       const boostOrigins = queues.flatMap((queue, level) =>
         queue.map((process, index) => ({ process, from: { place: queuePlace(level), index } as ProcessLocation })),
       );

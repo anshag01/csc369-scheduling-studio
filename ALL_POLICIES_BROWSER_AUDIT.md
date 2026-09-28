@@ -1,5 +1,7 @@
 # Scheduling Studio: terminology and all-policy browser audit
 
+Historical audit: the MLFQ expiry-before-boost ordering used in this run has since been superseded. See [BOOST_ORDER_VERIFICATION.md](BOOST_ORDER_VERIFICATION.md) for the confirmed ordering and its verification.
+
 This audit covers the clarification of service, quantum (time slice), and allotment in the visualizer. Scheduling decisions are unchanged by this patch. Cards now say `N service left`, settings define the budgets, and boundary explanations identify whether a number measures CPU service, quantum usage, or allotment usage.
 
 The new MLFQ teaching example loads two 10-tick processes with Q0 quantum 1 and allotment 4. Each takes four one-tick turns before demotion, retaining six service ticks. The ordinary defaults remain 2/4/8 for both budgets. The example sets boost to 100 so a boost does not interrupt the demonstration.
@@ -103,10 +105,10 @@ npm run test:e2e:audit
 npm run test:e2e:audit -- tests/e2e/all-policies-audit.spec.ts
 ```
 
-The audit config builds production, starts port 4174, and runs two workers. Reports are written to `playwright-report/<name>/index.html` and `test-results/<name>.json`; set `MLFQ_AUDIT_REPORT=<name>` to name a run. Generated reports, screenshots, and the refreshed rules PDF are ignored by Git.
+The audit config builds production, starts port 4174, and runs two workers. Reports are written to `playwright-report/<name>/index.html` and `test-results/<name>.json`; set `MLFQ_AUDIT_REPORT=<name>` to name a run. Generated reports and screenshots are ignored by Git. Shareable rules PDFs are tracked under `docs/rules/`.
 
 ## Limits and retained policy
 
 This is exhaustive over the explicitly stated finite matrices, not every possible input or platform. The audit covers local production Chromium in two desktop sizes; it does not establish Firefox, Safari, mobile, or deployed-site coverage. Engine-only early yield is covered by engine tests because the normal UI does not expose it.
 
-MLFQ retains the documented simultaneous-event order: completion, expiry/requeue, boost, then arrivals. A runner whose turn remains ongoing is appended after waiting work at a boost; an expired runner is boosted from its requeued position. Tests verify that policy, without claiming that Bogdan explicitly resolved the simultaneous-expiry interpretation.
+This historical run verified completion, expiry/requeue, boost, then arrivals. Bogdan has since confirmed that the unfinished runner belongs last even at simultaneous allotment expiry. Current MLFQ handles completion first, then boosts before either budget expiry, then admits arrivals and dispatches. See the verification report linked above for the updated tests.

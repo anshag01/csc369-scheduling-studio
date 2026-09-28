@@ -52,17 +52,11 @@ describe("authoritative scheduler transition phases", () => {
 
     const boundary = result.snapshots[2];
     expect(boundary.transitions.map((phase) => phase.action)).toEqual([
-      "demote",
       "boost",
       "arrive",
       "dispatch",
     ]);
     expect(boundary.transitions.map((phase) => phase.moves)).toEqual([
-      [{
-        processId: "A",
-        from: { place: "cpu" },
-        to: { place: "q1", index: 0 },
-      }],
       [
         {
           processId: "X",
@@ -71,7 +65,7 @@ describe("authoritative scheduler transition phases", () => {
         },
         {
           processId: "A",
-          from: { place: "q1", index: 0 },
+          from: { place: "cpu" },
           to: { place: "q0", index: 1 },
         },
       ],
@@ -89,10 +83,9 @@ describe("authoritative scheduler transition phases", () => {
 
     expect(boundary.transitionStart.running).toBe("A");
     expect(boundary.transitionStart.readyQueues).toEqual([["X"], [], []]);
-    expect(boundary.transitions[0].after).toMatchObject({ running: null, readyQueues: [["X"], ["A"], []] });
-    expect(boundary.transitions[1].after).toMatchObject({ running: null, readyQueues: [["X", "A"], [], []] });
-    expect(boundary.transitions[2].after).toMatchObject({ running: null, readyQueues: [["X", "A", "B"], [], []] });
-    expect(boundary.transitions[3].after).toEqual(stateOf(boundary));
+    expect(boundary.transitions[0].after).toMatchObject({ running: null, readyQueues: [["X", "A"], [], []] });
+    expect(boundary.transitions[1].after).toMatchObject({ running: null, readyQueues: [["X", "A", "B"], [], []] });
+    expect(boundary.transitions[2].after).toEqual(stateOf(boundary));
   });
 
   it("records RR arrival before rotation at an exact quantum boundary", () => {

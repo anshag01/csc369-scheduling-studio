@@ -9,19 +9,19 @@ export function expectedBoundaries(scenario: Scenario): Boundary[] {
   let cpu: number | undefined;
   const frames: Boundary[] = [];
   for (let time = 0; time <= 2000; time++) {
+    const boosting = time > 0 && time % scenario.boost === 0;
     let outgoing: number | undefined;
     if (cpu !== undefined) {
       const p = jobs[cpu];
       if (p.work === p.serviceTime) { p.done = time; cpu = undefined; }
-      else if (p.spent === scenario.allotments[p.level]) {
+      else if (!boosting && p.spent === scenario.allotments[p.level]) {
         outgoing = cpu; cpu = undefined;
         p.level = Math.min(2, p.level + 1); p.turn = 0; p.spent = 0;
-      } else if (p.turn === scenario.quanta[p.level]) {
+      } else if (!boosting && p.turn === scenario.quanta[p.level]) {
         outgoing = cpu; cpu = undefined; p.turn = 0;
       }
     }
-    if (time > 0 && time % scenario.boost === 0) {
-      if (outgoing !== undefined) { queues[jobs[outgoing].level].push(outgoing); outgoing = undefined; }
+    if (boosting) {
       const promoted = queues.flat();
       if (cpu !== undefined) promoted.push(cpu);
       queues.forEach(q => q.splice(0));
@@ -66,8 +66,10 @@ export const namedScenarios: Scenario[] = [
   scenario('lone runner is boosted and immediately redispatched', [job('A',0,7)], [1,4,8],[1,6,8],2,true,2),
   scenario('boost with waiting processes from mixed levels', [job('A',2,9),job('B',2,4),job('C',0,9),job('D',2,6)], [1,3,5],[1,3,5],7,false,7),
   scenario('arrival follows ongoing-runner boost', [job('A',0,6),job('B',0,4),job('C',2,1)], [4,8,8],[6,8,8],2,false,2),
-  scenario('expiry demotes before boost and runner need not be last', [job('X',0,8),job('B',3,3)], [1,1,8],[1,1,8],4,false,4),
-  scenario('quantum expiry rotates before boost', [job('A',0,7),job('B',0,4)], [2,4,8],[5,6,8],2,false,2),
+  scenario('boost overrides allotment expiry and places runner last', [job('X',0,8),job('B',3,3)], [1,1,8],[1,1,8],4,false,4),
+  scenario('confirmed B C D A order with arrival after boost', [job('D',0,20),job('C',4,10),job('A',5,10),job('B',5,10),job('E',6,1)], [1,3,8],[1,3,8],6,true,6),
+  scenario('boost overrides allotment expiry in a partial quantum', [job('A',0,7),job('B',0,4)], [4,4,8],[2,6,8],2,false,2),
+  scenario('boost overrides quantum expiry without rotating first', [job('A',0,7),job('B',0,4)], [2,4,8],[5,6,8],2,false,2),
   scenario('completion beats expiry boost and arrivals', [job('A',0,2),job('B',0,4),job('C',2,1)], [2,4,8],[2,4,8],2,false,2),
   scenario('arrival precedes rotation without boost', [job('A',0,6),job('B',2,3)], [2,4,8],[5,6,8],100,false,2),
   scenario('higher-priority preemption preserves both counters', [job('A',0,12),job('B',3,1),job('C',6,1)], [1,4,8],[1,7,10],100,false,3),

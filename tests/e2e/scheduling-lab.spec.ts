@@ -354,11 +354,11 @@ test("an immediately redispatched process still shows its intermediate queue mov
   await page.getByRole("spinbutton", { name: "Boost ticks" }).fill("2");
   await page.locator('[data-timeline-time="1"]').click();
   await page.getByRole("button", { name: "Next time step" }).click();
-  await expect(dashboard).toHaveAttribute("data-last-motion-types", "cpu->q1,q1->q0,q0->cpu");
-  await expect(dashboard).toHaveAttribute("data-motion-phase-count", "3");
+  await expect(dashboard).toHaveAttribute("data-last-motion-types", "cpu->q0,q0->cpu");
+  await expect(dashboard).toHaveAttribute("data-motion-phase-count", "2");
   await expect(page.locator(".cpu-process-copy")).toContainText("Q0 · Quantum used: 0/2 · Allotment used: 0/2");
-  await expect(page.getByTestId("event-list")).toContainText("moved from Q0 to Q1");
-  await expect(page.getByTestId("event-list")).toContainText("Priority boost moved 1 waiting process to Q0");
+  await expect(page.getByTestId("event-list")).not.toContainText("moved from Q0 to Q1");
+  await expect(page.getByTestId("event-list")).toContainText("Priority boost moved 1 active process to Q0");
 });
 
 test("playback, keyboard stepping, reset, and timeline inspection stay synchronized", async ({ page }) => {
@@ -493,7 +493,9 @@ test("invalid quantum settings show an error and recover after correction", asyn
 });
 
 test("large imported scenarios keep all MLFQ queues, events, metrics, and ticks accessible", async ({ page }) => {
-  const processes = Array.from({ length: 12 }, (_, index) => ({
+  // Enough arrivals to overflow the event panel even in the taller desktop layout.
+  const processCount = 50;
+  const processes = Array.from({ length: processCount }, (_, index) => ({
     id: `P${index}`,
     arrivalTime: 0,
     serviceTime: 3,
@@ -501,24 +503,26 @@ test("large imported scenarios keep all MLFQ queues, events, metrics, and ticks 
   await page.locator(".json-panel summary").click();
   await page.getByLabel("Scenario JSON").fill(JSON.stringify({ processes }));
   await page.getByRole("button", { name: "Import", exact: true }).click();
-  await expect(page.getByText("Loaded 12 processes.")).toBeVisible();
+  await expect(page.getByText(`Loaded ${processCount} processes.`)).toBeVisible();
   await page.locator("#algorithm").selectOption("mlfq");
 
-  await expect(page.locator(".process-row")).toHaveCount(12);
+  await expect(page.locator(".process-row")).toHaveCount(processCount);
   await expect(page.locator(".queue-row")).toHaveCount(3);
-  await expect(page.locator("[data-timeline-time]")).toHaveCount(36);
-  await expect(page.locator(".event-list p")).toHaveCount(13);
-  await expect(page.getByTestId("state-counts")).toHaveAttribute("data-ready-count", "11");
+  await expect(page.locator("[data-timeline-time]")).toHaveCount(processCount * 3);
+  await expect(page.locator(".event-list p")).toHaveCount(processCount + 1);
+  await expect(page.getByTestId("state-counts")).toHaveAttribute("data-ready-count", String(processCount - 1));
 
   const overflow = await page.evaluate(() => {
     const eventList = document.querySelector<HTMLElement>(".event-list")!;
     const timeline = document.querySelector<HTMLElement>(".timeline-scroll")!;
+    const timelineSection = document.querySelector<HTMLElement>(".timeline-section")!;
     const firstQueue = document.querySelector<HTMLElement>(".queue-track")!;
     return {
       eventScrollable: eventList.scrollHeight > eventList.clientHeight && getComputedStyle(eventList).overflowY === "auto",
       timelineScrollable: timeline.scrollWidth > timeline.clientWidth && getComputedStyle(timeline).overflowX === "auto",
       queueOverflowIsSafe: getComputedStyle(firstQueue).overflowX === "auto",
       pageDoesNotVerticallyScroll: document.documentElement.scrollHeight <= window.innerHeight + 1,
+      timelineFitsViewport: timelineSection.getBoundingClientRect().bottom <= window.innerHeight + 1,
     };
   });
   expect(overflow).toEqual({
@@ -526,6 +530,7 @@ test("large imported scenarios keep all MLFQ queues, events, metrics, and ticks 
     timelineScrollable: true,
     queueOverflowIsSafe: true,
     pageDoesNotVerticallyScroll: true,
+    timelineFitsViewport: true,
   });
 
   const queueSection = await page.locator(".queue-section").boundingBox();
@@ -538,7 +543,7 @@ test("large imported scenarios keep all MLFQ queues, events, metrics, and ticks 
   }
 
   await page.getByRole("button", { name: "Metrics", exact: true }).click();
-  await expect(page.locator("tr[data-process-id]")).toHaveCount(12);
+  await expect(page.locator("tr[data-process-id]")).toHaveCount(processCount);
   const metricsOverflowIsSafe = await page.locator(".metrics-scroll").evaluate((element) =>
     getComputedStyle(element).overflowY === "auto",
   );

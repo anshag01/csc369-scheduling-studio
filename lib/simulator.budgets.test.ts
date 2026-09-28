@@ -65,21 +65,76 @@ describe("independent MLFQ turn and priority budgets", () => {
     expect(result.snapshots[2].transitions.map((phase) => phase.action)).toEqual(["boost", "arrive", "dispatch"]);
   });
 
-  it("retains expiry-before-boost ordering, even when the expired runner is not last", () => {
+  it("boosts an exhausted runner after waiting lower-priority work", () => {
     const result = simulate([job("X"), job("B", 3)], config([1, 1, 8], [1, 1, 8], 4));
     const boundary = result.snapshots[4];
-    expect(boundary.transitions.map((phase) => phase.action)).toEqual(["demote", "boost", "dispatch"]);
-    expect(boundary.running).toBe("B");
-    expect(boundary.readyQueues).toEqual([["X"], [], []]);
+    expect(boundary.transitions.map((phase) => phase.action)).toEqual(["boost", "dispatch"]);
+    expect(boundary.running).toBe("X");
+    expect(boundary.readyQueues).toEqual([["B"], [], []]);
   });
 
-  it("rotates an expired quantum before boosting its accumulated allotment", () => {
+  it("boosts an expired quantum directly without an intermediate rotation", () => {
     const result = simulate([job("A"), job("B")], config([2], [5], 2));
     const boundary = result.snapshots[2];
-    expect(boundary.transitions.map((phase) => phase.action)).toEqual(["rotate", "boost", "dispatch"]);
+    expect(boundary.transitions.map((phase) => phase.action)).toEqual(["boost", "dispatch"]);
     expect(boundary.running).toBe("B");
     expect(boundary.readyQueues).toEqual([["A"]]);
     expect(boundary.processes.every((p) => p.quantumUsed === 0 && p.allotmentUsed === 0)).toBe(true);
+  });
+
+  it("uses Bogdan's B C D A order, with same-time arrivals after A", () => {
+    const result = simulate([
+      job("D", 0, 20), job("C", 4, 10), job("A", 5, 10), job("B", 5, 10), job("E", 6, 1),
+    ], config([1, 3, 8], [1, 3, 8], 6));
+    const boundary = result.snapshots[6];
+    expect(boundary.transitionStart).toMatchObject({ running: "A", readyQueues: [["B"], ["C"], ["D"]] });
+    expect(boundary.transitionStart.processes.find((p) => p.id === "A")).toMatchObject({
+      queueLevel: 0, quantumUsed: 1, allotmentUsed: 1, remainingTime: 9,
+    });
+    expect(boundary.transitions.map((phase) => phase.action)).toEqual(["boost", "arrive", "dispatch"]);
+    const boosted = boundary.transitions[0];
+    expect(boosted.after).toMatchObject({ running: null, readyQueues: [["B", "C", "D", "A"], [], []] });
+    expect(boosted.moves.at(-1)).toEqual({ processId: "A", from: { place: "cpu" }, to: { place: "q0", index: 3 } });
+    expect(boundary.transitions[1].after.readyQueues).toEqual([["B", "C", "D", "A", "E"], [], []]);
+    expect(boundary.running).toBe("B");
+    expect(boundary.readyQueues).toEqual([["C", "D", "A", "E"], [], []]);
+    expect(boundary.processes.find((p) => p.id === "A")).toMatchObject({
+      queueLevel: 0, quantumUsed: 0, allotmentUsed: 0, remainingTime: 9,
+    });
+  });
+
+  it.each([
+    { name: "both budgets in Q0", quanta: [2, 4, 8], allotments: [2, 4, 8], time: 2, level: 0 },
+    { name: "only quantum in Q0", quanta: [2, 4, 8], allotments: [3, 4, 8], time: 2, level: 0 },
+    { name: "allotment midway through a quantum", quanta: [4, 4, 8], allotments: [2, 4, 8], time: 2, level: 0 },
+    { name: "both budgets in Q1", quanta: [1, 2, 4], allotments: [1, 2, 4], time: 4, level: 1 },
+    { name: "both budgets in Q2", quanta: [1, 1, 2], allotments: [1, 1, 2], time: 6, level: 2 },
+  ])("boost overrides $name expiry", ({ quanta, allotments, time, level }) => {
+    const boundary = simulate([job("A"), job("B")], config(quanta, allotments, time)).snapshots[time];
+    expect(boundary.transitionStart.running).toBe("A");
+    expect(boundary.transitionStart.runningQueueLevel).toBe(level);
+    expect(boundary.transitions.map((phase) => phase.action)).toEqual(["boost", "dispatch"]);
+    expect(boundary.transitions[0].after.readyQueues).toEqual([["B", "A"], [], []]);
+    expect(boundary.running).toBe("B");
+    expect(boundary.processes.find((p) => p.id === "A")).toMatchObject({
+      queueLevel: 0, quantumUsed: 0, allotmentUsed: 0,
+      remainingTime: boundary.transitionStart.runningRemaining,
+    });
+  });
+
+  it("boosts a lone expired runner directly and immediately redispatches it", () => {
+    const boundary = simulate([job("A")], config([2, 4, 8], [2, 4, 8], 2)).snapshots[2];
+    expect(boundary.transitions.map((phase) => phase.action)).toEqual(["boost", "dispatch"]);
+    expect(boundary.running).toBe("A");
+    expect(boundary.processes[0]).toMatchObject({ queueLevel: 0, quantumUsed: 0, allotmentUsed: 0, remainingTime: 8 });
+  });
+
+  it("boost takes precedence over an engine-only early yield", () => {
+    const boundary = simulate([{ ...job("A"), relinquishEarly: true }, job("B")], config([4, 8], [8, 8], 3)).snapshots[3];
+    expect(boundary.transitions.map((phase) => phase.action)).toEqual(["boost", "dispatch"]);
+    expect(boundary.transitions[0].moves.at(-1)?.from).toEqual({ place: "cpu" });
+    expect(boundary.running).toBe("B");
+    expect(boundary.processes[0]).toMatchObject({ queueLevel: 0, quantumUsed: 0, allotmentUsed: 0, remainingTime: 7 });
   });
 
   it("completes before quantum, allotment, and boost handling", () => {

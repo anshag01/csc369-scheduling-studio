@@ -108,8 +108,9 @@ function referenceMlfqTimeline(
   let cpu: (typeof jobs)[number] | undefined;
   for (let t = 0; jobs.some((job) => job.remaining > 0); t++) {
     if (cpu?.remaining === 0) cpu = undefined;
+    const boost = t > 0 && t % boostInterval === 0;
     let requeue: typeof cpu;
-    if (cpu) {
+    if (cpu && !boost) {
       const demote = cpu.used === allotments[cpu.level];
       const rotate = cpu.turn === quanta[cpu.level];
       const yieldEarly = cpu.relinquishEarly && quanta[cpu.level] >= 2 && cpu.turn === quanta[cpu.level] - 1;
@@ -123,9 +124,7 @@ function referenceMlfqTimeline(
         }
       }
     }
-    const boost = t > 0 && t % boostInterval === 0;
     if (boost) {
-      if (requeue) { queues[requeue.level].push(requeue); requeue = undefined; }
       const promoted = [...queues.flat(), ...(cpu ? [cpu] : [])];
       queues.forEach((queue) => queue.splice(0));
       promoted.forEach((job) => { job.level = 0; job.used = 0; job.turn = 0; });

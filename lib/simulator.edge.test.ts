@@ -177,15 +177,15 @@ describe("scheduler edge cases and failure containment", () => {
     expect(boundary.events[0]).toContain("A was preempted and placed after all waiting processes");
   });
 
-  it("demotes an expired process before boosting it at the same boundary", () => {
+  it("boosts an expired process directly at the same boundary", () => {
     const result = simulate(
       [process("A", 0, 5), process("B", 0, 5)],
       config("mlfq", { mlfqQuanta: [1, 3], mlfqBoostInterval: 2 }),
     );
     const boundary = result.snapshots[2];
 
-    expect(boundary.events[0]).toBe("B used its full allotment and moved from Q0 to Q1. 1/1 allotment ticks used; 4 CPU service ticks remain.");
-    expect(boundary.events[1]).toBe("Priority boost moved 2 waiting processes to Q0 with fresh quantum and allotment.");
+    expect(boundary.events[0]).toBe("Priority boost moved 2 active processes to Q0 with fresh quantum and allotment; B was preempted and placed after all waiting processes.");
+    expect(boundary.transitions.map((phase) => phase.action)).toEqual(["boost", "dispatch"]);
     expect(boundary.running).toBe("A");
     expect(boundary.readyQueues[0]).toEqual(["B"]);
     expect(boundary.processes.find((item) => item.id === "B")).toMatchObject({

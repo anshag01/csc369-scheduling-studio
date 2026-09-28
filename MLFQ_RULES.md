@@ -58,13 +58,13 @@ A process with one service tick left finishes after one tick, regardless of how 
 
 ### Rule 6. Exhausting the allotment ends the priority level
 
-If an unfinished process has used its allotment, append it to the next lower queue and reset both usage counters. Thus Q0 moves to Q1, and Q1 moves to Q2. A process already in Q2 rejoins Q2's tail with fresh budgets.
+At a boundary without a boost, if an unfinished process has used its allotment, append it to the next lower queue and reset both usage counters. Thus Q0 moves to Q1, and Q1 moves to Q2. A process already in Q2 rejoins Q2's tail with fresh budgets.
 
-Allotment exhaustion takes precedence over quantum expiry and can happen partway through a turn. With quantum 2 and allotment 3, a process gets one full two-tick turn and only one tick of its next turn before demotion.
+Allotment exhaustion takes precedence over quantum expiry and can happen partway through a turn. If a boost is due at the same boundary, apply Rule 9 instead of demoting. With quantum 2 and allotment 3, a process gets one full two-tick turn and only one tick of its next turn before demotion.
 
 ### Rule 7. Quantum expiry alone ends only the turn
 
-If the quantum expires but allotment remains, append the unfinished process to the tail of the same queue. Reset quantum usage and preserve allotment usage.
+At a boundary without a boost, if the quantum expires but allotment remains, append the unfinished process to the tail of the same queue. Reset quantum usage and preserve allotment usage.
 
 With quantum 1 and allotment 4, a process can take four one-tick turns at that priority before demotion, provided it does not finish or receive a boost first. Returning to the queue does not erase the CPU time already charged to its allotment.
 
@@ -81,9 +81,11 @@ A boost occurs at positive multiples of the boost interval, never at time 0. For
 At a boost:
 
 1. Collect waiting processes from Q0, then Q1, then Q2. Preserve the order within each queue.
-2. Stop any process whose turn is still in progress and append it after all the waiting processes.
+2. Stop the unfinished running process and append it after all the waiting processes. Do this even if its quantum or allotment has just expired.
 3. Put the collected processes in Q0 and reset both usage counters. Preserve remaining service.
 4. Admit any arrivals at this time, then dispatch from Q0.
+
+Completion is checked before the boost. Otherwise, the boost replaces any same-boundary rotation or demotion: the running process moves directly from the CPU to the end of Q0.
 
 This also applies to a process already running in Q0. If nobody else is waiting or arriving, the interrupted process is immediately selected again with fresh budgets.
 
@@ -117,23 +119,27 @@ Arrivals therefore enter before expired work is requeued. An existing waiting pr
 ### With a boost
 
 1. Remove the running process if it has finished.
-2. Check for allotment exhaustion, then quantum expiry, and requeue the process if necessary.
-3. Perform the boost, appending only a process whose turn is still in progress after the waiting processes.
-4. Add all arrivals at the current time.
-5. Dispatch from Q0 if any process is ready.
+2. Collect waiting processes from Q0, then Q1, then Q2, preserving queue order.
+3. Append the unfinished running process last, even if a budget expired at this boundary.
+4. Put everyone collected in Q0 and reset both usage counters. Preserve remaining service.
+5. Add all arrivals at the current time.
+6. Dispatch from Q0 if any process is ready.
 
-A process whose budget expired has already entered a queue when the boost begins. It takes that queue's position in the collection order; it is not automatically placed last.
+Do not demote or rotate the running process before this boost. Completion comes first; the boost then takes precedence over either kind of budget expiry.
 
 ### Example. Allotment expiry coincides with a boost
 
 A exhausts its Q0 allotment but still needs service. B waits in Q0, C in Q1, and D in Q2.
 
-| Stage | Q0 | Q1 | Q2 |
-| --- | --- | --- | --- |
-| After demoting A | B | C, A | D |
-| After boosting | B, C, A, D | Empty | Empty |
+| Stage | CPU | Q0 | Q1 | Q2 |
+| --- | --- | --- | --- | --- |
+| Before handling the boundary | A | B | C | D |
+| After boost, before dispatch | Free | B, C, D, A | Empty | Empty |
+| After dispatch | B | C, D, A | Empty | Empty |
 
-A is placed behind C in Q1 before the boost. Collecting the queues gives [B, C, A, D], so B runs next. A new arrival E would be appended after D. If A had finished instead, it would leave first and the boost order would be [B, C, D].
+Collect B, C, and D first, then append A. A does not pass through Q1. All four processes receive fresh Q0 budgets, and B runs next. A new arrival E would join after A, making [B, C, D, A, E] before dispatch.
+
+The same order applies if only A's quantum expires. If A finishes its service at this boundary, it leaves first and the boost collects [B, C, D].
 
 ## 6. Worked example: separate quantum and allotment
 
@@ -157,7 +163,5 @@ After A's first, second, and third turns, its quantum usage resets to zero while
 B is still in Q0, so B gets the CPU for the tick from 7 to 8. At time 8, B also moves to Q1 with six service ticks left. Q1 now contains [A, B] before dispatch, so A runs next.
 
 <!-- maintainer-note:start -->
-The expiry-before-boost order is the current implementation policy. Bogdan's feedback did not explicitly settle this collision; confirmation is still pending.
-
-Engine-only options: `relinquishEarly` yields one tick before quantum expiry when quantum is at least two. It resets quantum usage, preserves allotment, and rejoins the same queue's tail. Completion and budget exhaustion take precedence; yielded work follows expired-work ordering. The normal UI does not enable this flag. Engine callers may use any nonempty number of queues, omit allotments to use the quanta, or omit the boost interval to disable boosting.
+Engine-only options: `relinquishEarly` yields one tick before quantum expiry when quantum is at least two. It resets quantum usage, preserves allotment, and rejoins the same queue's tail. Completion and boosts take precedence over early yield. At ordinary boundaries, budget exhaustion takes precedence over early yield, and arrivals enter before yielded work is requeued. The normal UI does not enable this flag. Engine callers may use any nonempty number of queues, omit allotments to use the quanta, or omit the boost interval to disable boosting.
 <!-- maintainer-note:end -->

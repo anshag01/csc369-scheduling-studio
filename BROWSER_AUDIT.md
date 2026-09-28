@@ -2,6 +2,8 @@
 
 Date: September 26, 2026 (America/Toronto). Application revision: `74a665a`.
 
+Historical audit: this report records the earlier expiry-before-boost policy. The confirmed boost-first policy and its verification are documented in [BOOST_ORDER_VERIFICATION.md](BOOST_ORDER_VERIFICATION.md).
+
 The audit uses real Chromium browsers against `next build` / `next start`, locally on port 4174, at 1920×1080 and 1366×768. It operates the public UI: selecting MLFQ, importing processes through the JSON editor, entering queue settings, clicking Next/Previous and timeline ticks, and editing/resetting/exporting scenarios. Expected results come from an independent reference model that does not import the production scheduler. Browser evaluation only reads rendered DOM; it does not inject simulation state.
 
 ## Results
@@ -64,7 +66,7 @@ This matrix uses reduced motion. The named cases extend coverage to deeper queue
 
 ## Policy and coverage limits
 
-The simultaneous-expiry policy remains the documented provisional choice: completion first, then expiry/requeue, then boost, then arrivals. A runner whose turn is still ongoing moves behind waiting work at the boost. An already-expired runner participates in the queue into which it was requeued. These tests verify that policy; they do not resolve the outstanding interpretation of Bogdan's simultaneous-expiry wording.
+The version covered by this historical audit handled expiry/requeue before boost. That policy has since been superseded by Bogdan's confirmation: after completion handling, boost takes precedence over budget expiry and places the unfinished runner last. See the current rules and the boost-order verification report linked above.
 
 Coverage is exhaustive within the stated finite matrix, not every possible process list or setting. It covers local production Chromium at two desktop viewport sizes, not a deployed website, Firefox, Safari, or mobile. The normal UI does not expose the engine's optional early-yield flag, so that behavior remains covered by engine tests rather than these UI walkthroughs.
 

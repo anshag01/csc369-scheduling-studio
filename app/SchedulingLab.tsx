@@ -40,7 +40,7 @@ const algorithmGuidance: Record<Algorithm, { rule: string; detail: string }> = {
   },
   mlfq: {
     rule: "Run the highest queue; use round robin among processes at the same level.",
-    detail: "Quantum expiry rotates within a queue; full allotment demotes. Boosts reset active work to Q0. Expiry is handled first; an ongoing runner goes after waiting work.",
+    detail: "Quantum expiry rotates within a queue; full allotment demotes. Boosts reset active work to Q0. Completion comes first; a boost overrides expiry and puts the unfinished runner after waiting work.",
   },
 };
 

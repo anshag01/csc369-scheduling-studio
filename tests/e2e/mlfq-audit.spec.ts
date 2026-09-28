@@ -65,7 +65,9 @@ async function traverse(page:Page,s:Scenario,info:TestInfo,capture=false) {
 
 for(const s of namedScenarios) {
   test(`MLFQ walkthrough: ${s.name}`,async({page},info)=>{
-    test.setTimeout(s.animated?180000:90000);
+    // Animated cases traverse every boundary in both directions. Allow the
+    // complete workload to play instead of capping long traces at three minutes.
+    test.setTimeout(s.animated ? Math.max(180000, expectedBoundaries(s).length * 6000) : 90000);
     const errors:string[]=[];page.on('pageerror',error=>errors.push(error.message));
     await start(page,s.animated);
     const summary=await traverse(page,s,info,true);

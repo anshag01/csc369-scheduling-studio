@@ -220,24 +220,16 @@ test("compound MLFQ boundaries expose every authoritative forward and reverse ph
   await page.locator('[data-timeline-time="1"]').click();
   await page.getByRole("button", { name: "Next time step" }).click();
 
-  const demote = await expectPhase(page, "demote", 0, 4);
-  expect(demote.cpu).toBe("");
-  expect(demote.queues).toEqual(["X", "A", ""]);
-  expect(demote.travelers.find((traveler) => traveler.id === "A")).toMatchObject({ from: "cpu", to: "q1" });
-  await expect(page.locator('.process-motion-traveler[data-process-id="A"]'))
-    .toHaveAttribute("data-motion-route", "standard");
-  await expect(page.locator('.process-motion-arrow[data-motion-action="demote"]'))
-    .toHaveAttribute("data-motion-route", "standard");
-
-  const boost = await expectPhase(page, "boost", 1, 4);
+  const boost = await expectPhase(page, "boost", 0, 3);
+  expect(boost.cpu).toBe("");
   expect(boost.queues).toEqual(["X,A", "", ""]);
-  expect(boost.travelers.find((traveler) => traveler.id === "A")?.to).toBe("q0");
+  expect(boost.travelers.find((traveler) => traveler.id === "A")).toMatchObject({ from: "cpu", to: "q0" });
 
-  const arrive = await expectPhase(page, "arrive", 2, 4);
+  const arrive = await expectPhase(page, "arrive", 1, 3);
   expect(arrive.queues).toEqual(["X,A,B", "", ""]);
   expect(arrive.travelers.find((traveler) => traveler.id === "B")?.from).toBe("future");
 
-  const dispatch = await expectPhase(page, "dispatch", 3, 4);
+  const dispatch = await expectPhase(page, "dispatch", 2, 3);
   expect(dispatch.cpu).toBe("X");
   expect(dispatch.queues).toEqual(["A,B", "", ""]);
   expect(dispatch.travelers.find((traveler) => traveler.id === "X")?.to).toBe("cpu");
@@ -269,21 +261,69 @@ test("compound MLFQ boundaries expose every authoritative forward and reverse ph
   await expect(page.locator(".dashboard-grid")).toHaveAttribute("data-motion-status", "idle");
 
   await page.getByRole("button", { name: "Previous time step" }).click();
-  const undoDispatch = await expectPhase(page, "dispatch", 0, 4);
+  const undoDispatch = await expectPhase(page, "dispatch", 0, 3);
   expect(undoDispatch.cpu).toBe("");
   expect(undoDispatch.queues).toEqual(["X,A,B", "", ""]);
 
-  const undoArrival = await expectPhase(page, "arrive", 1, 4);
+  const undoArrival = await expectPhase(page, "arrive", 1, 3);
   expect(undoArrival.queues).toEqual(["X,A", "", ""]);
   expect(undoArrival.newCount).toBe("1");
 
-  const undoBoost = await expectPhase(page, "boost", 2, 4);
-  expect(undoBoost.queues).toEqual(["X", "A", ""]);
-
-  const undoDemote = await expectPhase(page, "demote", 3, 4);
-  expect(undoDemote.cpu).toBe("A");
-  expect(undoDemote.queues).toEqual(["X", "", ""]);
+  const undoBoost = await expectPhase(page, "boost", 2, 3);
+  expect(undoBoost.cpu).toBe("A");
+  expect(undoBoost.queues).toEqual(["X", "", ""]);
+  expect(undoBoost.travelers.find((traveler) => traveler.id === "A")).toMatchObject({ from: "q0", to: "cpu" });
   await expect(page.locator(".dashboard-grid")).toHaveAttribute("data-motion-status", "idle");
+});
+
+test("confirmed expiry and boost order moves A directly behind B C D and reverses cleanly", async ({ page }, info) => {
+  await importScenario(page, [
+    { id: "D", arrivalTime: 0, serviceTime: 20 },
+    { id: "C", arrivalTime: 4, serviceTime: 10 },
+    { id: "A", arrivalTime: 5, serviceTime: 10 },
+    { id: "B", arrivalTime: 5, serviceTime: 10 },
+    { id: "E", arrivalTime: 6, serviceTime: 1 },
+  ]);
+  await page.locator("#algorithm").selectOption("mlfq");
+  for (const [level, budget] of [1, 3, 8].entries()) {
+    await page.getByRole("spinbutton", { name: `Q${level} quantum`, exact: true }).fill(String(budget));
+    await page.getByRole("spinbutton", { name: `Q${level} allotment`, exact: true }).fill(String(budget));
+  }
+  await page.getByRole("spinbutton", { name: "Boost ticks" }).fill("6");
+  await page.locator(".speed-control select").selectOption("2000");
+  await page.locator('[data-timeline-time="5"]').click();
+  await expect(page.getByTestId("cpu-process-card")).toHaveAttribute("data-process-id", "A");
+  await page.getByRole("button", { name: "Next time step" }).click();
+
+  const boost = await expectPhase(page, "boost", 0, 3);
+  expect(boost.queues).toEqual(["B,C,D,A", "", ""]);
+  expect(boost.travelers.find((p) => p.id === "A")).toMatchObject({ from: "cpu", to: "q0", budgets: "Q: 1/1 · A: 1/1" });
+  const arrival = await expectPhase(page, "arrive", 1, 3);
+  expect(arrival.queues).toEqual(["B,C,D,A,E", "", ""]);
+  const dispatch = await expectPhase(page, "dispatch", 2, 3);
+  expect(dispatch.cpu).toBe("B");
+  expect(dispatch.queues).toEqual(["C,D,A,E", "", ""]);
+  await expect(page.locator(".dashboard-grid")).toHaveAttribute("data-motion-status", "idle");
+  await expect(page.locator('.queue-track [data-process-id="A"]')).toHaveAttribute("data-remaining", "9");
+  await expect(page.locator('.queue-track [data-process-id="A"] .process-budgets')).toHaveText("Q: 0/1 · A: 0/1");
+  await expect(page.getByTestId("event-list")).not.toContainText("moved from Q0 to Q1");
+  await page.locator(".movement-review summary").click();
+  await expect(page.locator(".movement-review li")).toHaveCount(3);
+  await expect(page.locator(".movement-review")).toContainText("priority boost B, C, D, A");
+  await expect(page.locator(".movement-review")).not.toContainText("demote");
+  await info.attach("confirmed-boost-order", { body: await page.screenshot({ fullPage: true }), contentType: "image/png" });
+  await page.locator(".movement-review summary").click();
+
+  await page.getByRole("button", { name: "Previous time step" }).click();
+  await expectPhase(page, "dispatch", 0, 3);
+  await expectPhase(page, "arrive", 1, 3);
+  const undo = await expectPhase(page, "boost", 2, 3);
+  expect(undo.cpu).toBe("A");
+  expect(undo.queues).toEqual(["B", "C", "D"]);
+  expect(undo.travelers.find((p) => p.id === "A")).toMatchObject({ from: "q0", to: "cpu" });
+  await expect(page.locator(".dashboard-grid")).toHaveAttribute("data-motion-status", "idle");
+  await expect(page.getByTestId("time-value")).toHaveText("5");
+  await expect(page.getByTestId("cpu-process-card")).toHaveAttribute("data-remaining", "10");
 });
 
 test("rapid buttons and keys cannot skip a boundary", async ({ page }) => {
@@ -487,8 +527,7 @@ test("multi-process boosts use distinct curved lanes and readable stacking", asy
   await armTravelerOverlapSampler(page, "friendly-boost", "boost");
   await page.getByRole("button", { name: "Next time step" }).click();
 
-  await expectPhase(page, "demote", 0, 3);
-  await expectPhase(page, "boost", 1, 3);
+  await expectPhase(page, "boost", 0, 2);
   const boostTravelers = page.locator('.process-motion-traveler[data-motion-action="boost"]');
   await expect(boostTravelers).toHaveCount(3);
   await expect(page.locator(".process-motion-target[data-motion-hidden]" )).toHaveCount(3);
@@ -546,8 +585,7 @@ test("mixed-level boost traffic never lets one moving card mask another", async 
   await armTravelerOverlapSampler(page, "mixed-level-boost", "boost");
   await page.getByRole("button", { name: "Next time step" }).click();
 
-  await expectPhase(page, "demote", 0, 3);
-  await expectPhase(page, "boost", 1, 3);
+  await expectPhase(page, "boost", 0, 2);
   const travelers = page.locator('.process-motion-traveler[data-motion-action="boost"]');
   await expect(travelers).toHaveCount(4);
   await expect(page.locator(".process-motion-target-slot")).toHaveCount(4);
@@ -674,9 +712,9 @@ test("reduced motion snaps to the final state without travelers or a playback lo
 
   const dashboard = page.locator(".dashboard-grid");
   await expect(dashboard).toHaveAttribute("data-motion-status", "idle");
-  await expect(dashboard).toHaveAttribute("data-motion-phase-count", "4");
+  await expect(dashboard).toHaveAttribute("data-motion-phase-count", "3");
   expect(await page.evaluate(() => (window as Window & { __motionPhases?: string[] }).__motionPhases)).toEqual([
-    "demote", "boost", "arrive", "dispatch",
+    "boost", "arrive", "dispatch",
   ]);
   await expect(page.getByTestId("cpu-process-card")).toHaveAttribute("data-process-id", "X");
   await expect(page.getByTestId("ready-queue-0")).toHaveAttribute("data-ready-ids", "A,B");
