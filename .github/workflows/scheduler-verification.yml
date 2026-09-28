@@ -47,9 +47,13 @@ jobs:
       - run: npm run test:stress
 
   browser-visualization:
-    name: Chromium visualization and interaction checks
+    name: Production browser audit (${{ matrix.project }})
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        project: [desktop-chromium, compact-chromium]
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v6
@@ -58,12 +62,12 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npx playwright install --with-deps chromium
-      - run: npm run test:e2e
-      - name: Preserve browser diagnostics on failure
-        if: failure()
+      - run: npm run test:e2e:audit -- --project=${{ matrix.project }}
+      - name: Preserve browser audit reports
+        if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: playwright-diagnostics
+          name: playwright-diagnostics-${{ matrix.project }}
           path: |
             playwright-report
             test-results

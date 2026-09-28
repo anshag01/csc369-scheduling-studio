@@ -21,6 +21,7 @@ The simulator runs entirely in the browser. Each student has an independent loca
 - Play, pause, reset, previous, and next-step controls
 - Current CPU state and ordered ready queue visualization
 - Multiple priority queues, separate quantum/allotment settings, and demotion events for MLFQ
+- Explicit CPU service labels, time-slice definitions, and a loadable quantum/allotment teaching example
 - Priority boosts that preempt and reset all active processes to Q0
 - Clickable execution timeline
 - Step-by-step scheduling explanations
@@ -39,3 +40,5 @@ npm run dev
 ```
 
 Run the normal scheduling-engine tests with `npm run test:unit`, the independent large-workload suite with `npm run test:stress`, and the browser visualization suite with `npm run test:e2e` (after `npx playwright install chromium`). See [TESTING.md](TESTING.md) for the rule-to-test mapping and complete verification matrix.
+
+`npm run test:e2e:audit` runs the production browser suite, including 612 workload/policy combinations in both viewport sizes and layout/interaction regressions. Scope, results, and reproduction instructions are in [ALL_POLICIES_BROWSER_AUDIT.md](ALL_POLICIES_BROWSER_AUDIT.md).

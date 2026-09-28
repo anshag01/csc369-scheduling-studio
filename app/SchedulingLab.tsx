@@ -31,7 +31,7 @@ const algorithmGuidance: Record<Algorithm, { rule: string; detail: string }> = {
     detail: "This version is non-preemptive and uses the original service time.",
   },
   stcf: {
-    rule: "Keep the process with the shortest remaining time on the CPU.",
+    rule: "Keep the process with the shortest remaining CPU service on the CPU.",
     detail: "A strictly shorter arrival preempts the running process.",
   },
   rr: {
@@ -40,7 +40,7 @@ const algorithmGuidance: Record<Algorithm, { rule: string; detail: string }> = {
   },
   mlfq: {
     rule: "Run the highest queue; use round robin among processes at the same level.",
-    detail: "Quantum expiry rotates within a queue; full allotment demotes. Boosts reset all active work to Q0, placing the running process last.",
+    detail: "Quantum expiry rotates within a queue; full allotment demotes. Boosts reset active work to Q0. Expiry is handled first; an ongoing runner goes after waiting work.",
   },
 };
 
@@ -210,6 +210,15 @@ export default function SchedulingLab({
     }]);
   };
   const loadExample = () => { resetPlayback(); setProcesses(exampleProcesses.map((process) => ({ ...process }))); };
+  const loadBudgetExample = () => {
+    resetPlayback();
+    setProcesses(["A", "B"].map((id, index) => ({ id, arrivalTime: 0, serviceTime: 10, color: palette[index] })));
+    setMlfqQuanta([1, 4, 8]);
+    setMlfqAllotments([4, 4, 8]);
+    setMlfqBoostInterval(100);
+    setShowMetrics(true);
+    setJsonMessage("");
+  };
   const prepareJson = () => { setJsonText(JSON.stringify({ processes }, null, 2)); setJsonMessage("Scenario copied into the editor."); };
   const importJson = () => {
     try {
@@ -254,6 +263,14 @@ export default function SchedulingLab({
     const longestBudget = `Q: ${quantum}/${quantum} · A: ${allotment}/${allotment}`;
     return longestBudget.length * 6 + 18; // 10px monospace text plus padding/borders.
   }));
+  const serviceCardWidth = Math.max(120, ...processes.map((process) =>
+    Math.ceil(`${process.serviceTime} service left`.length * 6.6 + 18),
+  ));
+  const rrCardWidth = Math.max(120, ...processes.map((process) =>
+    `${Math.min(process.serviceTime, quantum)}/${quantum} slice`.length * 6 + 18,
+  ));
+  const processCardWidth = algorithm === "mlfq" ? Math.max(serviceCardWidth, mlfqCardWidth)
+    : algorithm === "rr" ? Math.max(serviceCardWidth, rrCardWidth) : serviceCardWidth;
   const motionDuration = speed === 2000 ? 1800 : speed === 1400 ? 1200 : 650;
   useTypedProcessMotion(
     dashboardRef,
@@ -282,12 +299,15 @@ export default function SchedulingLab({
             <select id="algorithm" value={algorithm} onChange={(event) => { resetPlayback(); setAlgorithm(event.target.value as Algorithm); }}>
               {(Object.keys(algorithms) as Algorithm[]).map((key) => <option key={key} value={key}>{algorithms[key].short} — {algorithms[key].name}</option>)}
             </select>
-            {algorithm === "rr" && <div className="inline-setting"><label htmlFor="quantum">Time quantum</label><div className="number-with-unit"><input id="quantum" type="number" min="1" value={quantum} onChange={(event) => { resetPlayback(); setQuantum(wholeNumber(event.target.value, 1)); }} /><span>ticks</span></div></div>}
+            {algorithm === "rr" && <div className="inline-setting"><label htmlFor="quantum">Time quantum</label><div className="number-with-unit"><input id="quantum" aria-describedby="rr-quantum-help" type="number" min="1" value={quantum} onChange={(event) => { resetPlayback(); setQuantum(wholeNumber(event.target.value, 1)); }} /><span>ticks</span></div></div>}
+            {algorithm === "rr" && <p className="budget-help" id="rr-quantum-help"><strong>Quantum (time slice):</strong> maximum CPU ticks per turn.</p>}
             {algorithm === "mlfq" && <div className="mlfq-settings">
               <p className="field-label">Queue budgets (ticks)</p>
+              <div className="budget-help"><p id="quantum-help"><strong>Quantum (time slice):</strong> maximum CPU ticks per turn.</p><p id="allotment-help"><strong>Allotment:</strong> total CPU ticks at this priority before demotion.</p></div>
               <div className="mlfq-budget-heading"><span>Queue</span><span>Quantum</span><span>Allotment</span></div>
-              {mlfqQuanta.map((value, index) => <div className="mlfq-budget-row" key={index}><span>Q{index}</span><input aria-label={`Q${index} quantum`} title="CPU time per turn" type="number" min="1" value={value} onChange={(event) => { resetPlayback(); setMlfqQuanta((current) => current.map((item, itemIndex) => itemIndex === index ? wholeNumber(event.target.value, 1) : item)); }} /><input aria-label={`Q${index} allotment`} title="Total CPU time at this priority" type="number" min="1" value={mlfqAllotments[index]} onChange={(event) => { resetPlayback(); setMlfqAllotments((current) => current.map((item, itemIndex) => itemIndex === index ? wholeNumber(event.target.value, 1) : item)); }} /></div>)}
+              {mlfqQuanta.map((value, index) => <div className="mlfq-budget-row" key={index}><span>Q{index}</span><input aria-label={`Q${index} quantum`} aria-describedby="quantum-help" title="CPU time per turn" type="number" min="1" value={value} onChange={(event) => { resetPlayback(); setMlfqQuanta((current) => current.map((item, itemIndex) => itemIndex === index ? wholeNumber(event.target.value, 1) : item)); }} /><input aria-label={`Q${index} allotment`} aria-describedby="allotment-help" title="Total CPU time at this priority" type="number" min="1" value={mlfqAllotments[index]} onChange={(event) => { resetPlayback(); setMlfqAllotments((current) => current.map((item, itemIndex) => itemIndex === index ? wholeNumber(event.target.value, 1) : item)); }} /></div>)}
               <label className="boost-setting">Boost<input type="number" min="1" value={mlfqBoostInterval} onChange={(event) => { resetPlayback(); setMlfqBoostInterval(wholeNumber(event.target.value, 1)); }} /><span>ticks</span></label>
+              <details className="budget-example"><summary>Quantum vs allotment example</summary><p>A and B each need 10 CPU service ticks. With Q0 quantum 1 and allotment 4, each takes four one-tick turns before demotion, with 6 service ticks still left. Boosts are set to 100 to avoid interrupting this example.</p><button type="button" onClick={loadBudgetExample}>Load quantum/allotment example</button></details>
             </div>}
             <div className="policy-note">
               <span>{algorithms[algorithm].short} rule</span>
@@ -298,11 +318,11 @@ export default function SchedulingLab({
 
           <section className="panel-section process-section">
             <div className="section-heading"><div><span className="step-number">02</span><h2>Define processes</h2></div><button className="text-button" onClick={loadExample}>Load example</button></div>
-            <div className="process-table-head"><span>Process</span><span>Arrival</span><span>Service</span><span /></div>
+            <p className="budget-help" id="service-help"><strong>Service:</strong> total CPU work needed to finish, in ticks.</p><div className="process-table-head"><span>Process</span><span>Arrival</span><span>Service</span><span /></div>
             <div className="process-inputs">{processes.map((process, index) => <div className="process-row" key={`${index}-${process.color}`}>
               <label className="process-id-input"><span style={{ background: process.color }} /><input aria-label={`Process ${index + 1} ID`} maxLength={6} value={process.id} onChange={(event) => updateProcess(index, { id: event.target.value.toUpperCase() })} /></label>
               <input aria-label={`${process.id} arrival time`} type="number" min="0" value={process.arrivalTime} onChange={(event) => updateProcess(index, { arrivalTime: wholeNumber(event.target.value, 0) })} />
-              <input aria-label={`${process.id} service time`} type="number" min="1" value={process.serviceTime} onChange={(event) => updateProcess(index, { serviceTime: wholeNumber(event.target.value, 1) })} />
+              <input aria-label={`${process.id} service time`} aria-describedby="service-help" type="number" min="1" value={process.serviceTime} onChange={(event) => updateProcess(index, { serviceTime: wholeNumber(event.target.value, 1) })} />
               <button aria-label={`Remove ${process.id}`} className="remove-button" onClick={() => { resetPlayback(); setProcesses((current) => current.filter((_, processIndex) => processIndex !== index)); }}>×</button>
             </div>)}</div>
             <button className="add-button" onClick={addProcess}><span>＋</span>Add process</button>
@@ -332,7 +352,7 @@ export default function SchedulingLab({
             <div className="keyboard-hint"><kbd>←</kbd><kbd>→</kbd> step <kbd>space</kbd> play</div>
           </div>
           {!snapshot ? <div className="empty-state"><span>!</span><h2>Check the scenario</h2><p>{validationError}</p></div> : <>
-            <div ref={dashboardRef} className={`dashboard-grid ${algorithm === "mlfq" ? "mlfq-dashboard" : ""} ${showMetrics ? "metrics-visible" : "metrics-hidden"}`} style={algorithm === "mlfq" ? { "--process-card-width": `${mlfqCardWidth}px` } as React.CSSProperties : undefined} data-snapshot-time={snapshot.time} data-running-process={displayState?.running ?? ""} data-running-remaining={displayState?.runningRemaining ?? ""} data-motion-duration={motionDuration} data-motion-status={motionBusy ? "playing" : "idle"}>
+            <div ref={dashboardRef} className={`dashboard-grid ${algorithm === "mlfq" ? "mlfq-dashboard" : ""} ${processCardWidth > 160 ? "wide-budget-dashboard" : ""} ${showMetrics ? "metrics-visible" : "metrics-hidden"}`} style={{ "--process-card-width": `${processCardWidth}px` } as React.CSSProperties} data-snapshot-time={snapshot.time} data-running-process={displayState?.running ?? ""} data-running-remaining={displayState?.runningRemaining ?? ""} data-motion-duration={motionDuration} data-motion-status={motionBusy ? "playing" : "idle"}>
             <div className="status-grid">
               <article className="cpu-card" data-running-process={displayState?.running ?? ""} data-running-queue={displayState?.runningQueueLevel ?? ""}><div className="card-label"><span className="live-dot" />CPU · RUNNING</div>
                 {runningProcess && runningView ? <div className="running-content" data-motion-cpu-target><div
@@ -350,7 +370,7 @@ export default function SchedulingLab({
                   style={{ "--process-color": runningProcess.color } as React.CSSProperties}
                 >
                   <strong>{runningView.id}</strong>
-                  <span>{runningView.remainingTime} left</span>
+                  <span>{runningView.remainingTime} service left</span>
                   {algorithm === "mlfq" && <MlfqCardBudgets quantumUsed={runningView.quantumUsed} quantum={mlfqQuanta[runningView.queueLevel]} allotmentUsed={runningView.allotmentUsed} allotment={mlfqAllotments[runningView.queueLevel]} />}
                   {algorithm === "rr" && <small>{runningView.quantumUsed}/{quantum} slice</small>}
                   {algorithm === "mlfq" && <i className="allotment-meter" aria-hidden="true"><b style={{ width: `${runningView.allotmentUsed / mlfqAllotments[runningView.queueLevel] * 100}%` }} /></i>}
@@ -368,7 +388,7 @@ export default function SchedulingLab({
                   {algorithm === "mlfq" && <div className="queue-label"><div><strong>Q{queueIndex}</strong><span>{queueIndex === 0 ? "Highest" : queueIndex === (displayState?.readyQueues.length ?? 0) - 1 ? "Lowest" : "Medium"} priority</span></div><span>Quantum: {mlfqQuanta[queueIndex]}</span><span>Allotment: {mlfqAllotments[queueIndex]}</span>{queueIndex < (displayState?.readyQueues.length ?? 0) - 1 && <i className="demotion-cue">full allotment ↓</i>}</div>}
                   <div className="queue-track" data-testid={`ready-queue-${queueIndex}`} data-ready-ids={queue.join(",")}>
                     <span className="queue-head">HEAD</span>
-                    {queue.length === 0 ? <span className="empty-queue">Queue empty</span> : queue.map((id) => { const process = processById.get(id)!; const view = displayState?.processes.find((item) => item.id === id); const used = view?.allotmentUsed ?? 0; return <div className={`queue-chip ${algorithm === "mlfq" ? "mlfq-queue-chip" : ""}`} data-process-id={id} data-state="ready" data-remaining={view?.remainingTime} data-quantum-used={algorithm === "mlfq" ? view?.quantumUsed : undefined} data-allotment-used={algorithm === "mlfq" ? used : undefined} data-motion-id={id} data-motion-place={algorithm === "mlfq" ? `q${queueIndex}` : "ready"} data-motion-color={process.color} key={id} style={{ "--process-color": process.color } as React.CSSProperties} title={algorithm === "mlfq" ? `${id}: ${mlfqQuanta[queueIndex] - (view?.quantumUsed ?? 0)} quantum ticks left; ${allotted - used} allotment ticks left at Q${queueIndex}` : undefined}><strong>{id}</strong><span>{view?.remainingTime} left</span>{algorithm === "mlfq" && <MlfqCardBudgets quantumUsed={view?.quantumUsed ?? 0} quantum={mlfqQuanta[queueIndex]} allotmentUsed={used} allotment={allotted} />}{algorithm === "mlfq" && <i className="allotment-meter" aria-hidden="true"><b style={{ width: `${used / allotted * 100}%` }} /></i>}</div>; })}
+                    {queue.length === 0 ? <span className="empty-queue">Queue empty</span> : queue.map((id) => { const process = processById.get(id)!; const view = displayState?.processes.find((item) => item.id === id); const used = view?.allotmentUsed ?? 0; return <div className={`queue-chip ${algorithm === "mlfq" ? "mlfq-queue-chip" : ""}`} data-process-id={id} data-state="ready" data-remaining={view?.remainingTime} data-quantum-used={algorithm === "mlfq" ? view?.quantumUsed : undefined} data-allotment-used={algorithm === "mlfq" ? used : undefined} data-motion-id={id} data-motion-place={algorithm === "mlfq" ? `q${queueIndex}` : "ready"} data-motion-color={process.color} key={id} style={{ "--process-color": process.color } as React.CSSProperties} title={algorithm === "mlfq" ? `${id}: ${mlfqQuanta[queueIndex] - (view?.quantumUsed ?? 0)} quantum ticks left; ${allotted - used} allotment ticks left at Q${queueIndex}` : undefined}><strong>{id}</strong><span>{view?.remainingTime} service left</span>{algorithm === "mlfq" && <MlfqCardBudgets quantumUsed={view?.quantumUsed ?? 0} quantum={mlfqQuanta[queueIndex]} allotmentUsed={used} allotment={allotted} />}{algorithm === "mlfq" && <i className="allotment-meter" aria-hidden="true"><b style={{ width: `${used / allotted * 100}%` }} /></i>}</div>; })}
                     <span className="queue-tail">TAIL</span>
                   </div>
                 </div>;

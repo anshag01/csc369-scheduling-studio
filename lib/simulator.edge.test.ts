@@ -87,7 +87,7 @@ describe("scheduler edge cases and failure containment", () => {
     const strictlyShorter = [process("A", 0, 5), process("B", 2, 2)];
     expect(trace("stcf", strictlyShorter)).toBe("AABBAAA");
     const boundary = simulate(strictlyShorter, config("stcf")).snapshots[2];
-    expect(boundary.events.join("\n")).toContain("B has less remaining time, so A was preempted.");
+    expect(boundary.events.join("\n")).toContain("B has less remaining CPU service, so A was preempted.");
     expect(boundary.running).toBe("B");
     expect(boundary.readyQueues[0]).toEqual(["A"]);
   });
@@ -100,7 +100,7 @@ describe("scheduler edge cases and failure containment", () => {
     expect(result.timeline.map((slice) => slice.processId).join("")).toBe("ABA");
     expect(result.snapshots[1].events).toEqual([
       "B arrived and joined the ready queue.",
-      "A's quantum expired; it moved to the back of the ready queue. 1/1 ticks used; 1 service ticks remain. Same-time arrivals enter before the expired process.",
+      "A's quantum expired; it moved to the back of the ready queue. 1/1 quantum ticks used; 1 CPU service ticks remain. Same-time arrivals enter before the expired process.",
       "B was selected: first in the Round Robin queue, with a fresh 1-tick quantum.",
     ]);
   });
@@ -184,7 +184,7 @@ describe("scheduler edge cases and failure containment", () => {
     );
     const boundary = result.snapshots[2];
 
-    expect(boundary.events[0]).toBe("B used its full allotment and moved from Q0 to Q1. 1/1 ticks used; 4 service ticks remain.");
+    expect(boundary.events[0]).toBe("B used its full allotment and moved from Q0 to Q1. 1/1 allotment ticks used; 4 CPU service ticks remain.");
     expect(boundary.events[1]).toBe("Priority boost moved 2 waiting processes to Q0 with fresh quantum and allotment.");
     expect(boundary.running).toBe("A");
     expect(boundary.readyQueues[0]).toEqual(["B"]);

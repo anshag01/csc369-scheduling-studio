@@ -4,10 +4,14 @@ The simulator uses one CPU, discrete ticks, and CPU-only processes. The normal U
 
 Each queue has two independent positive whole-number settings:
 
-- **Quantum:** maximum CPU ticks in a turn before rotating within that queue.
+- **Quantum (time slice):** maximum CPU ticks in a turn before rotating within that queue.
 - **Allotment:** cumulative CPU ticks at that priority before demotion.
 
 Both settings default to Q0 = 2, Q1 = 4, Q2 = 8. The default boost interval is 10 ticks. Engine callers that omit `mlfqAllotments` use their quantum values as allotments for compatibility. Omitting the engine's boost interval disables boosts.
+
+**Service** is the total CPU work a process needs to finish. Cards label remaining work explicitly, for example `6 service left`. MLFQ cards also show `Q: used/total · A: used/total`; these are the current turn's quantum and the cumulative allotment at the current priority. Waiting time consumes neither budget nor service. The settings explain both budgets, and the CPU panel and metrics table show their remaining values separately.
+
+The **Quantum vs allotment example** in the MLFQ settings loads A and B with 10 service ticks each, Q0 quantum 1 and allotment 4, and boost interval 100. They alternate in Q0 for four one-tick turns each, then enter Q1 with six service ticks remaining. A demotes at t=7; B demotes at t=8. Loading this example resets playback and opens metrics; the usual defaults are unchanged.
 
 ## 1. Highest priority runs first
 

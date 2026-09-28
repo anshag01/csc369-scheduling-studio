@@ -97,7 +97,7 @@ test("the running process appears only on the CPU for every policy", async ({ pa
     await expect(cpuProcessCard).toHaveAttribute("data-queue-level", "0");
     await expect(cpuProcessCard).toHaveAttribute("data-remaining", "2");
     await expect(cpuProcessCard).toContainText("A");
-    await expect(cpuProcessCard).toContainText("2 left");
+    await expect(cpuProcessCard).toContainText("2 service left");
     await expect(cpuProcessCard).not.toContainText("ON CPU");
     await expect(page.locator(".cpu-process-copy")).toContainText("2 ticks of CPU service remaining");
     await expect(page.getByTestId("ready-queue-0")).toHaveAttribute("data-ready-ids", "");

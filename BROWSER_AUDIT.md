@@ -102,3 +102,7 @@ MLFQ CPU, ready-queue, and animated cards now display `Q: used/total · A: used/
 Validation for this UI change: 84 unit/component tests passed, along with TypeScript, ESLint, and whitespace checks. The 56 production browser regressions were run at both viewport sizes. A short-window scrolling regression was fixed by placing the legend beside the queue heading; screenshot review also caught and fixed clipped CPU details with larger budgets. All 16 affected layout and animation checks passed on the final version, leaving a passing latest result for all 56 distinct browser checks.
 
 The browser assertions verify distinct used counters, demotion resets, forward/reverse boost and quantum-rotation labels, unclipped multi-digit labels and CPU details, queue/CPU card geometry, and short-window layout. Final screenshots were visually inspected. Local evidence is in `playwright-report/card-budgets-final/` and `test-results/card-budgets-evidence/`.
+
+## Follow-up: service terminology and all-policy coverage
+
+The next audit extends independent browser walkthroughs to FCFS, SJF, STCF, and Round Robin; adds seeded MLFQ workloads and the quantum/allotment teaching example; and checks exact large-budget counters. See [ALL_POLICIES_BROWSER_AUDIT.md](ALL_POLICIES_BROWSER_AUDIT.md) for the changes, finite test domains, results, and current evidence paths.

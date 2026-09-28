@@ -161,12 +161,12 @@ function explainSelection(process: RuntimeProcess, queues: RuntimeProcess[][], c
       ? " Equal lengths are resolved by earlier arrival, then input order."
       : " Equal lengths and arrival times are resolved by input order."
     : "";
-  return `${process.id} was selected: shortest ${config.algorithm === "sjf" ? "service" : "remaining"} time among ready processes (${score(process)} ticks).${tieReason}`;
+  return `${process.id} was selected: shortest ${config.algorithm === "sjf" ? "total CPU service" : "remaining CPU service"} among ready processes (${score(process)} ticks).${tieReason}`;
 }
 
 function explainContinuation(process: RuntimeProcess, queues: RuntimeProcess[][], config: SimulationConfig) {
   if (config.algorithm === "fcfs" || config.algorithm === "sjf") {
-    return `${process.id} continues with ${process.remainingTime} ticks left: ${config.algorithm.toUpperCase()} is non-preemptive, so ready processes must wait for it to finish.`;
+    return `${process.id} continues with ${process.remainingTime} CPU service ticks remaining: ${config.algorithm.toUpperCase()} is non-preemptive, so ready processes must wait for it to finish.`;
   }
   if (config.algorithm === "rr") {
     return `${process.id} continues: ${process.quantumUsed}/${config.quantum} quantum ticks used; ${config.quantum - process.quantumUsed} remain in this turn.`;
@@ -176,11 +176,11 @@ function explainContinuation(process: RuntimeProcess, queues: RuntimeProcess[][]
     return `${process.id} continues in Q${process.queueLevel}: no higher-priority queue is ready (${process.quantumUsed}/${config.mlfqQuanta[process.queueLevel]} quantum ticks used; ${process.allotmentUsed}/${allotment} allotment ticks used).`;
   }
   const contender = bestRemaining(queues[0]);
-  if (!contender) return `${process.id} continues with ${process.remainingTime} ticks left; no other process is ready.`;
+  if (!contender) return `${process.id} continues with ${process.remainingTime} CPU service ticks remaining; no other process is ready.`;
   if (contender.remainingTime === process.remainingTime) {
-    return `${process.id} continues: it and ${contender.id} each have ${process.remainingTime} ticks left. STCF keeps the current process on an equal-time tie.`;
+    return `${process.id} continues: it and ${contender.id} each have ${process.remainingTime} CPU service ticks remaining. STCF keeps the current process on an equal-time tie.`;
   }
-  return `${process.id} continues: ${process.remainingTime} ticks left, less than the shortest ready alternative, ${contender.id} (${contender.remainingTime} ticks).`;
+  return `${process.id} continues: ${process.remainingTime} CPU service ticks remaining, less than the shortest ready alternative, ${contender.id} (${contender.remainingTime} ticks).`;
 }
 
 function makeViews(
@@ -376,8 +376,8 @@ export function simulate(
           !demoted
             ? `${process.id}'s quantum expired; it returned to the back of Q${process.queueLevel}, keeping ${used}/${allotments[previousLevel]} allotment ticks used.`
             : previousLevel === process.queueLevel
-              ? `${process.id} used its full allotment and returned to Q${process.queueLevel}. ${used}/${allotments[previousLevel]} ticks used; it stays at the lowest priority with a fresh allotment.`
-              : `${process.id} used its full allotment and moved from Q${previousLevel} to Q${process.queueLevel}. ${used}/${allotments[previousLevel]} ticks used; ${process.remainingTime} service ticks remain.`,
+              ? `${process.id} used its full allotment and returned to Q${process.queueLevel}. ${used}/${allotments[previousLevel]} allotment ticks used; it stays at the lowest priority with a fresh allotment.`
+              : `${process.id} used its full allotment and moved from Q${previousLevel} to Q${process.queueLevel}. ${used}/${allotments[previousLevel]} allotment ticks used; ${process.remainingTime} CPU service ticks remain.`,
         );
       } else {
         process.allotmentUsed = 0;
@@ -388,7 +388,7 @@ export function simulate(
           from: { place: "cpu" },
           to: { place: "ready", index: queues[0].length - 1 },
         }]);
-        events.push(`${process.id}'s quantum expired; it moved to the back of the ready queue. ${used}/${config.quantum} ticks used; ${process.remainingTime} service ticks remain.${processes.some((job) => job.arrivalTime === time) ? " Same-time arrivals enter before the expired process." : ""}`);
+        events.push(`${process.id}'s quantum expired; it moved to the back of the ready queue. ${used}/${config.quantum} quantum ticks used; ${process.remainingTime} CPU service ticks remain.${processes.some((job) => job.arrivalTime === time) ? " Same-time arrivals enter before the expired process." : ""}`);
       }
     };
 
@@ -461,7 +461,7 @@ export function simulate(
       if (contender.remainingTime < running.remainingTime) {
         const preempted = running;
         events.push(
-          `${contender.id} has less remaining time, so ${preempted.id} was preempted. ${contender.remainingTime} < ${preempted.remainingTime} ticks remaining.`,
+          `${contender.id} has less remaining CPU service, so ${preempted.id} was preempted. ${contender.remainingTime} < ${preempted.remainingTime} CPU service ticks remaining.`,
         );
         preempted.quantumUsed = 0;
         preempted.allotmentUsed = 0;

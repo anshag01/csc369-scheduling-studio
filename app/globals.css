@@ -412,3 +412,22 @@ footer { display: flex; justify-content: space-between; gap: 16px; padding: 13px
   footer { flex-direction: column; }
 }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; animation-duration: .01ms !important; } }
+
+.budget-help { margin: 8px 0; color: var(--muted); font-size: 11px; line-height: 1.4; }
+.budget-help p { margin: 4px 0; }
+.budget-help strong { color: #3d4e6b; }
+.budget-example { margin-top: 12px; color: var(--muted); font-size: 11px; line-height: 1.4; }
+.budget-example summary { color: #3d5489; cursor: pointer; font-weight: 600; }
+.budget-example p { margin: 8px 0; }
+.budget-example button { padding: 7px 9px; border: 1px solid #cbd4eb; border-radius: 5px; background: #f2f5fb; color: #304e99; font-size: 11px; }
+
+/* Large valid budgets need room for their exact counters and CPU details. */
+.wide-budget-dashboard .status-grid { grid-template-columns: minmax(0, 1fr); }
+.dashboard-grid.wide-budget-dashboard .cpu-card, .dashboard-grid.wide-budget-dashboard .event-card { min-height: 172px; height: auto; }
+.wide-budget-dashboard .cpu-card { overflow: auto; }
+.wide-budget-dashboard .running-content { flex-wrap: wrap; max-width: none; }
+.wide-budget-dashboard .cpu-process-copy { flex: 1 0 240px; }
+@media (min-width: 1001px) and (min-height: 600px) {
+  .dashboard-grid.wide-budget-dashboard { grid-template-rows: auto 150px minmax(160px, 1fr); }
+  .dashboard-grid.wide-budget-dashboard.mlfq-dashboard { grid-template-rows: auto 272px minmax(160px, 1fr); }
+}
