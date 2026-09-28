@@ -28,7 +28,7 @@ The simulator runs entirely in the browser. Each student has an independent loca
 - Waiting, response, and turnaround metrics
 - Keyboard controls and responsive layout
 
-The implemented MLFQ behavior, including simultaneous-event ordering, is documented in [MLFQ_RULES.md](MLFQ_RULES.md).
+Implemented rules and worked examples for every policy are available in the [rules document index](docs/rules/README.md), with separate Markdown and PDF versions. The [MLFQ rules](MLFQ_RULES.md) also document the current simultaneous-event ordering.
 
 ## Development
 

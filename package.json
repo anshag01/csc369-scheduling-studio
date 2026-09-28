@@ -6,6 +6,7 @@
     "node": ">=22.13.0"
   },
   "scripts": {
+    "docs:rules": "node scripts/generate-rules-pdfs.mjs",
     "dev": "vinext dev",
     "dev:e2e": "next dev -p 4173",
     "build": "vinext build",
