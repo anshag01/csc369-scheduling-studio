@@ -36,7 +36,7 @@ async function check(page:Page,expected:Boundary) {
     cpu:document.querySelector('[data-testid="cpu-process-card"] strong')?.textContent??null,
     queues:[...document.querySelectorAll('[data-testid^="ready-queue-"]')].map(q=>[...q.querySelectorAll('.queue-chip strong')].map(p=>p.textContent)),
     rows:[...document.querySelectorAll('.metrics-scroll tbody tr')].map(tr=>[...tr.querySelectorAll('td')].map(td=>td.textContent)),
-    budgets:document.querySelector('[data-testid="running-budgets"]')?.textContent??null,
+    budgets:document.querySelector('[data-testid="running-budgets"]') ? [...document.querySelectorAll('[data-testid="running-budgets"] tbody tr')].map(row => [...row.children].map(cell => cell.textContent)) : null,
     cardBudgets: [...document.querySelectorAll('.dashboard-grid [data-motion-id]')].filter(e => e.querySelector('.process-budgets')).map(e => [e.querySelector('strong')!.textContent!, e.querySelector('.process-budgets')!.textContent!]).sort((a,b) => a[0].localeCompare(b[0])),
     cards:[...document.querySelectorAll('.dashboard-grid [data-motion-id]')].map(e=>e.querySelector('strong')!.textContent).sort(),
   }));

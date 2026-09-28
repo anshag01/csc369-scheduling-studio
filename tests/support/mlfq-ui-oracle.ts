@@ -1,7 +1,7 @@
 // Independent expectation model for browser tests. No production scheduler imports.
 export type Job = { id: string; arrivalTime: number; serviceTime: number };
 export type Scenario = { name: string; jobs: Job[]; quanta: number[]; allotments: number[]; boost: number; animated?: boolean; capture?: number };
-export type Boundary = { time: number; cpu: string | null; queues: string[][]; rows: string[][]; budgets: string | null; cards: string[]; cardBudgets: string[][] };
+export type Boundary = { time: number; cpu: string | null; queues: string[][]; rows: string[][]; budgets: string[][] | null; cards: string[]; cardBudgets: string[][] };
 
 export function expectedBoundaries(scenario: Scenario): Boundary[] {
   const jobs = scenario.jobs.map((job, order) => ({ ...job, order, level: 0, turn: 0, spent: 0, work: 0, first: null as number | null, done: null as number | null })).sort((a,b)=>a.arrivalTime-b.arrivalTime||a.order-b.order);
@@ -45,7 +45,10 @@ export function expectedBoundaries(scenario: Scenario): Boundary[] {
         String(Math.max(0,(p.done ?? time)-p.arrivalTime)-p.work),
         p.first === null ? '—' : String(p.first-p.arrivalTime),
         p.done === null ? '—' : String(p.done-p.arrivalTime)]),
-      budgets: runner ? `Quantum left: ${scenario.quanta[runner.level]-runner.turn} · Allotment left: ${scenario.allotments[runner.level]-runner.spent}` : null,
+      budgets: runner ? [
+        ['Quantum', `${runner.turn}/${scenario.quanta[runner.level]}`, String(scenario.quanta[runner.level]-runner.turn)],
+        ['Allotment', `${runner.spent}/${scenario.allotments[runner.level]}`, String(scenario.allotments[runner.level]-runner.spent)],
+      ] : null,
       cardBudgets: jobs.filter((_,id)=>state(id)==='running'||state(id)==='ready').map(p=>[p.id, `Q: ${p.turn}/${scenario.quanta[p.level]} · A: ${p.spent}/${scenario.allotments[p.level]}`]).sort((a,b)=>a[0].localeCompare(b[0])),
       cards: jobs.filter((_,id)=>state(id)==='running'||state(id)==='ready').map(p=>p.id).sort(),
     });

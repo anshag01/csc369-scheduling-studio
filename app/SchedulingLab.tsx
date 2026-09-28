@@ -374,7 +374,23 @@ export default function SchedulingLab({
                   {algorithm === "mlfq" && <MlfqCardBudgets quantumUsed={runningView.quantumUsed} quantum={mlfqQuanta[runningView.queueLevel]} allotmentUsed={runningView.allotmentUsed} allotment={mlfqAllotments[runningView.queueLevel]} />}
                   {algorithm === "rr" && <small>{runningView.quantumUsed}/{quantum} slice</small>}
                   {algorithm === "mlfq" && <i className="allotment-meter" aria-hidden="true"><b style={{ width: `${runningView.allotmentUsed / mlfqAllotments[runningView.queueLevel] * 100}%` }} /></i>}
-                </div><div className="cpu-process-copy"><p>Executing now</p><h2>Process {runningProcess.id}</h2><span>{runningView.remainingTime} tick{runningView.remainingTime === 1 ? "" : "s"} of CPU service remaining</span>{algorithm === "mlfq" && <><small>Q{runningView.queueLevel} · <span className="used-budget">Quantum used: {runningView.quantumUsed}/{mlfqQuanta[runningView.queueLevel]}</span> · <span className="used-budget">Allotment used: {runningView.allotmentUsed}/{mlfqAllotments[runningView.queueLevel]}</span></small><small data-testid="running-budgets">Quantum left: {mlfqQuanta[runningView.queueLevel] - runningView.quantumUsed} · Allotment left: {mlfqAllotments[runningView.queueLevel] - runningView.allotmentUsed}</small></>}{algorithm === "rr" && <small>{runningView.quantumUsed}/{quantum} quantum used</small>}</div></div> : <div className="idle-content" data-motion-cpu-target><div className="process-orb idle">—</div><div><p>Nothing dispatched</p><h2>CPU idle</h2><span>Waiting for work</span></div></div>}
+                </div>
+                  <div className="cpu-process-copy">
+                    <div className="cpu-process-title">
+                      <h2>Process {runningProcess.id}</h2>
+                      {algorithm === "mlfq" && <span className="cpu-queue-badge">Q{runningView.queueLevel}</span>}
+                    </div>
+                    <p className="cpu-service">{runningView.remainingTime} tick{runningView.remainingTime === 1 ? "" : "s"} of CPU service remaining</p>
+                    {algorithm === "mlfq" && <table className="cpu-budget-table" data-testid="running-budgets" aria-label="CPU budgets in ticks">
+                      <thead><tr><th scope="col">Budget</th><th scope="col">Used / total</th><th scope="col">Left</th></tr></thead>
+                      <tbody>
+                        <tr><th scope="row">Quantum</th><td>{runningView.quantumUsed}/{mlfqQuanta[runningView.queueLevel]}</td><td>{mlfqQuanta[runningView.queueLevel] - runningView.quantumUsed}</td></tr>
+                        <tr><th scope="row">Allotment</th><td>{runningView.allotmentUsed}/{mlfqAllotments[runningView.queueLevel]}</td><td>{mlfqAllotments[runningView.queueLevel] - runningView.allotmentUsed}</td></tr>
+                      </tbody>
+                    </table>}
+                    {algorithm === "rr" && <small>{runningView.quantumUsed}/{quantum} quantum used</small>}
+                  </div>
+                </div> : <div className="idle-content" data-motion-cpu-target><div className="process-orb idle">—</div><div><p>Nothing dispatched</p><h2>CPU idle</h2><span>Waiting for work</span></div></div>}
                 <div className="completion-dock" data-testid="completion-dock" data-motion-finish-target data-completed-count={completedCount} aria-label={`${completedCount} completed process${completedCount === 1 ? "" : "es"}`}><i aria-hidden="true">✓</i><span><small>COMPLETED</small><strong>{completedCount}</strong></span></div>
                 <div className="cpu-progress"><span style={{ width: runningProcess ? `${((runningProcess.serviceTime - (displayState?.runningRemaining ?? 0)) / runningProcess.serviceTime) * 100}%` : "0%", background: runningProcess?.color }} /></div>
               </article>

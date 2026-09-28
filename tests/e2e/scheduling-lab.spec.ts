@@ -31,6 +31,14 @@ function expectedStateAt(trace: string, time: number) {
   });
 }
 
+async function expectMlfqBudgets(page: Page, level: number, quantumUsed: number, quantum: number, allotmentUsed: number, allotment: number) {
+  await expect(page.locator(".cpu-queue-badge")).toHaveText(`Q${level}`);
+  const table = page.getByTestId("running-budgets");
+  await expect(table.locator("thead th")).toHaveText(["Budget", "Used / total", "Left"]);
+  await expect(table.locator("tbody tr").nth(0).locator("th, td")).toHaveText(["Quantum", `${quantumUsed}/${quantum}`, String(quantum - quantumUsed)]);
+  await expect(table.locator("tbody tr").nth(1).locator("th, td")).toHaveText(["Allotment", `${allotmentUsed}/${allotment}`, String(allotment - allotmentUsed)]);
+}
+
 async function assertBoundary(page: Page, trace: string, time: number) {
   const expected = expectedStateAt(trace, time);
   const dashboard = page.locator(".dashboard-grid");
@@ -109,7 +117,7 @@ test("the running process appears only on the CPU for every policy", async ({ pa
     } else if (algorithm === "mlfq") {
       await expect(cpuProcessCard).toHaveAttribute("data-allotment-used", "1");
       await expect(cpuProcessCard.locator(".process-budgets")).toHaveText("Q: 1/2 · A: 1/2");
-      await expect(page.locator(".cpu-process-copy")).toContainText("Q0 · Quantum used: 1/2 · Allotment used: 1/2");
+      await expectMlfqBudgets(page, 0, 1, 2, 1, 2);
     }
 
     const clippedTokenText = await cpuProcessCard.locator("strong, span, small").evaluateAll((items) =>
@@ -262,7 +270,7 @@ test("completion and MLFQ boosts have complete, destination-based animations", a
   await expect(page.locator(".dashboard-grid")).toHaveAttribute("data-motion-status", "idle");
   await expect(page.getByTestId("cpu-process-card")).toHaveAttribute("data-process-id", "B");
   await expect(page.getByTestId("ready-queue-0")).toHaveAttribute("data-ready-ids", "A");
-  await expect(page.getByTestId("running-budgets")).toHaveText("Quantum left: 1 · Allotment left: 1");
+  await expectMlfqBudgets(page, 0, 0, 1, 0, 1);
 });
 
 test("MLFQ demotion and higher-priority preemption animate to their exact destinations", async ({ page }) => {
@@ -345,7 +353,7 @@ test("an immediately redispatched process still shows its intermediate queue mov
   await page.getByRole("button", { name: "Next time step" }).click();
   await expect(dashboard).toHaveAttribute("data-last-motion-types", "cpu->q1,q1->cpu");
   await expect(dashboard).toHaveAttribute("data-motion-phase", "demote");
-  await expect(page.locator(".cpu-process-copy")).toContainText("Q1 · Quantum used: 0/4 · Allotment used: 0/4");
+  await expectMlfqBudgets(page, 1, 0, 4, 0, 4);
   await expect(page.getByTestId("ready-queue-1")).toHaveAttribute("data-ready-ids", "");
   await expect(dashboard).toHaveAttribute("data-motion-status", "idle");
 
@@ -356,7 +364,7 @@ test("an immediately redispatched process still shows its intermediate queue mov
   await page.getByRole("button", { name: "Next time step" }).click();
   await expect(dashboard).toHaveAttribute("data-last-motion-types", "cpu->q0,q0->cpu");
   await expect(dashboard).toHaveAttribute("data-motion-phase-count", "2");
-  await expect(page.locator(".cpu-process-copy")).toContainText("Q0 · Quantum used: 0/2 · Allotment used: 0/2");
+  await expectMlfqBudgets(page, 0, 0, 2, 0, 2);
   await expect(page.getByTestId("event-list")).not.toContainText("moved from Q0 to Q1");
   await expect(page.getByTestId("event-list")).toContainText("Priority boost moved 1 active process to Q0");
 });
@@ -422,8 +430,7 @@ test("independent queue settings show remaining turn and allotment budgets", asy
   await page.getByRole("spinbutton", { name: "Boost ticks" }).fill("100");
   await page.locator('[data-timeline-time="4"]').click();
   await expect(page.getByTestId("cpu-process-card")).toHaveAttribute("data-process-id", "A");
-  await expect(page.getByTestId("running-budgets")).toHaveText("Quantum left: 2 · Allotment left: 1");
-  await expect(page.locator(".cpu-process-copy")).toContainText("Q0 · Quantum used: 0/2 · Allotment used: 2/3");
+  await expectMlfqBudgets(page, 0, 0, 2, 2, 3);
   await expect(page.getByTestId("cpu-process-card").locator(".process-budgets")).toHaveText("Q: 0/2 · A: 2/3");
   await expect(page.getByTestId("ready-queue-0").locator(".process-budgets")).toHaveText("Q: 0/2 · A: 2/3");
   await expect(page.locator(".cpu-process-copy")).toContainText("4 ticks of CPU service remaining");
@@ -435,8 +442,7 @@ test("independent queue settings show remaining turn and allotment budgets", asy
   await expect(page.getByTestId("ready-queue-1")).toHaveAttribute("data-ready-ids", "A");
   await expect(page.getByTestId("ready-queue-1").locator(".process-budgets")).toHaveText("Q: 0/4 · A: 0/4");
   await page.getByRole("button", { name: "Previous time step" }).click();
-  await expect(page.getByTestId("running-budgets")).toHaveText("Quantum left: 2 · Allotment left: 1");
-  await expect(page.locator(".cpu-process-copy")).toContainText("Q0 · Quantum used: 0/2 · Allotment used: 2/3");
+  await expectMlfqBudgets(page, 0, 0, 2, 2, 3);
   await expect(page.getByTestId("cpu-process-card").locator(".process-budgets")).toHaveText("Q: 0/2 · A: 2/3");
   await expect(page.getByTestId("ready-queue-0").locator(".process-budgets")).toHaveText("Q: 0/2 · A: 2/3");
   await info.attach("independent-card-budgets", { body: await page.screenshot({ fullPage: true }), contentType: "image/png" });
