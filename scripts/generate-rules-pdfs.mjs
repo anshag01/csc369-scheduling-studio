@@ -12,14 +12,40 @@ const inline = value => escape(value)
   .replace(/`([^`]+)`/g, '<code>$1</code>')
   .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
 
-// These controlled source files use headings, paragraphs, lists, and tables.
-// Reject unsupported blocks rather than silently dropping document content.
+// A From / To / CPU table stays readable in Markdown and becomes a timeline in print.
+function schedule(rows, number) {
+  const spans = rows.map(([from, to, cpu]) => ({ from: Number(from), to: Number(to), cpu }));
+  if (!spans.length || spans.some((span, i) =>
+    !Number.isSafeInteger(span.from) || !Number.isSafeInteger(span.to) ||
+    span.from < 0 || span.to <= span.from || !span.cpu ||
+    (i > 0 && span.from !== spans[i - 1].to)
+  )) throw new Error('CPU schedules must contain contiguous, positive whole-tick intervals.');
+  const start = spans[0].from;
+  const end = spans.at(-1).to;
+  const x = time => 16 + (time - start) / (end - start) * 568;
+  const cells = spans.map(span => {
+    const left = x(span.from);
+    const width = x(span.to) - left;
+    return `<rect x="${left}" y="8" width="${width}" height="32" fill="white" stroke="#222" stroke-width="0.8"/><text x="${left + width / 2}" y="29" text-anchor="middle">${escape(span.cpu)}</text><text class="tick" x="${left}" y="60" text-anchor="middle">${span.from}</text>`;
+  }).join('');
+  const description = spans.map(span => `${span.cpu} from ${span.from} to ${span.to}`).join('; ');
+  return `<figure><svg viewBox="0 0 600 70" role="img" aria-label="${escape(description)}"><title>${escape(description)}</title>${cells}<text class="tick" x="${x(end)}" y="60" text-anchor="middle">${end}</text></svg><figcaption>Figure ${number}. CPU schedule (time in ticks).</figcaption></figure>`;
+}
+
+// Support only the Markdown used by these documents; reject unsupported blocks.
 function render(markdown) {
   const source = markdown.replace(/<!-- maintainer-note:start -->[\s\S]*?<!-- maintainer-note:end -->/g, '');
+  if (source.includes('\u2014')) throw new Error('Use sentences or ordinary punctuation, not em dashes.');
   const lines = source.split(/\r?\n/);
   const html = [];
   let sectionOpen = false;
+  let subsectionOpen = false;
   let title = '';
+  let figureNumber = 0;
+  const closeSubsection = () => {
+    if (subsectionOpen) html.push('</div>');
+    subsectionOpen = false;
+  };
   for (let i = 0; i < lines.length;) {
     const line = lines[i].trim();
     if (!line) { i++; continue; }
@@ -28,9 +54,16 @@ function render(markdown) {
       html.push(`<h1>${inline(title)}</h1>`); i++; continue;
     }
     if (line.startsWith('## ')) {
+      closeSubsection();
       if (sectionOpen) html.push('</section>');
-      html.push(`<section class="rule"><h2>${inline(line.slice(3))}</h2>`);
+      html.push(`<section${line.includes('Worked example') ? ' class="worked-example"' : ''}><h2>${inline(line.slice(3))}</h2>`);
       sectionOpen = true; i++; continue;
+    }
+    if (line.startsWith('### ')) {
+      closeSubsection();
+      const heading = line.slice(4);
+      html.push(`<div class="${heading.startsWith('Rule ') ? 'rule' : 'subsection'}"><h3>${inline(heading)}</h3>`);
+      subsectionOpen = true; i++; continue;
     }
     if (line.startsWith('|')) {
       const rows = [];
@@ -38,7 +71,11 @@ function render(markdown) {
       if (rows.length < 2 || !rows[1].every(cell => /^:?-+:?$/.test(cell))) throw new Error(`Invalid table: ${line}`);
       const head = rows[0];
       if (rows.some(row => row.length !== head.length)) throw new Error(`Inconsistent table columns: ${line}`);
-      html.push(`<table><thead><tr>${head.map(cell => `<th>${inline(cell)}</th>`).join('')}</tr></thead><tbody>${rows.slice(2).map(row => `<tr>${row.map(cell => `<td>${inline(cell)}</td>`).join('')}</tr>`).join('')}</tbody></table>`);
+      if (head.join('|') === 'From|To|CPU') {
+        html.push(schedule(rows.slice(2), ++figureNumber));
+      } else {
+        html.push(`<table><thead><tr>${head.map(cell => `<th scope="col">${inline(cell)}</th>`).join('')}</tr></thead><tbody>${rows.slice(2).map(row => `<tr>${row.map(cell => `<td>${inline(cell)}</td>`).join('')}</tr>`).join('')}</tbody></table>`);
+      }
       continue;
     }
     const ordered = /^\d+\. /.test(line);
@@ -52,8 +89,9 @@ function render(markdown) {
     if (/^(#|>|```|<)/.test(line)) throw new Error(`Unsupported Markdown block: ${line}`);
     const paragraph = [];
     while (i < lines.length && lines[i].trim() && !/^(#|\||- |\d+\. )/.test(lines[i].trim())) paragraph.push(lines[i++].trim());
-    html.push(`<p${/^(Example:|Completion example:|Bottom-queue example:|\*\*Example:)/.test(line) ? ' class="example"' : ''}>${inline(paragraph.join(' '))}</p>`);
+    html.push(`<p>${inline(paragraph.join(' '))}</p>`);
   }
+  closeSubsection();
   if (sectionOpen) html.push('</section>');
   return { title, body: html.join('\n') };
 }
@@ -61,17 +99,24 @@ function render(markdown) {
 const style = `
 @page { size: A4; }
 * { box-sizing: border-box; }
-body { margin: 0; color: #111; font: 11pt/1.35 Arial, Helvetica, sans-serif; }
-h1 { margin: 0 0 18px; font-size: 18pt; line-height: 1.2; }
-h2 { margin: 17px 0 7px; font-size: 11pt; line-height: 1.3; break-after: avoid; }
-p { margin: 7px 0; orphans: 3; widows: 3; }
-ul, ol { margin: 7px 0; padding-left: 22px; }
-li { margin: 5px 0; break-inside: avoid; }
-code { font: 10pt/1.4 "DejaVu Sans Mono", monospace; }
-table { border-collapse: collapse; width: 70%; margin: 10px 0 14px; font-size: 10.5pt; }
-th { text-align: left; border-bottom: 1px solid #555; }
-th, td { padding: 4px 18px 4px 0; }
+body { margin: 0; color: #171717; font: 11pt/1.4 "TeX Gyre Pagella", "Palatino Linotype", "Book Antiqua", "Liberation Serif", serif; }
+h1 { margin: 0 0 14pt; font-size: 23pt; line-height: 1.18; font-weight: normal; text-wrap: balance; }
+h2 { margin: 15pt 0 7pt; font-size: 14pt; line-height: 1.25; break-after: avoid; }
+h3 { margin: 9pt 0 4pt; font-size: 11pt; line-height: 1.35; break-after: avoid; }
+p { margin: 0 0 6pt; orphans: 3; widows: 3; break-inside: avoid; }
+.rule, .subsection, .worked-example { break-inside: avoid; }
+h2 + p, p:has(+ ol), p:has(+ ul), p:has(+ figure), p:has(+ table) { break-after: avoid; }
+ul, ol { margin: 6pt 0 10pt; padding-left: 20pt; break-inside: avoid; }
+li { margin: 4pt 0; padding-left: 2pt; break-inside: avoid; }
+code { font: 9pt/1.4 "DejaVu Sans Mono", monospace; }
+table { border-collapse: collapse; width: 100%; margin: 12pt 0; border-top: 1pt solid #222; border-bottom: 1pt solid #222; font-size: 10.5pt; line-height: 1.3; break-inside: avoid; }
+th { text-align: left; border-bottom: 0.6pt solid #555; font-weight: normal; font-style: italic; }
+th, td { padding: 4pt 8pt; vertical-align: top; }
 tr { break-inside: avoid; }
+figure { margin: 10pt 0 10pt; break-inside: avoid; }
+svg { display: block; width: 100%; font: 15px "TeX Gyre Pagella", "Liberation Serif", serif; overflow: visible; }
+svg .tick { font-size: 13px; }
+figcaption { margin-top: 3pt; text-align: center; font-size: 9.5pt; font-style: italic; }
 `;
 
 await mkdir(output, { recursive: true });
@@ -81,17 +126,18 @@ try {
   for (const policy of policies) {
     const markdown = await readFile(path.join(root, `${policy}_RULES.md`), 'utf8');
     const { title, body } = render(markdown);
-    const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>${escape(title)} — Rules</title><style>${style}</style></head><body>${body}</body></html>`;
+    const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>${escape(title)}</title><style>${style}</style></head><body>${body}</body></html>`;
     await writeFile(path.join(preview, `${policy}_Rules.html`), html);
     const page = await browser.newPage();
     try {
       await page.setContent(html, { waitUntil: 'load' });
+      await page.evaluate(() => document.fonts.ready);
       await page.pdf({
         path: path.join(output, `${policy}_Rules.pdf`), format: 'A4', printBackground: true,
         tagged: true, outline: true, displayHeaderFooter: true,
-        margin: { top: '18mm', right: '20mm', bottom: '18mm', left: '20mm' },
-        headerTemplate: '<div></div>',
-        footerTemplate: `<div style="font:9px Arial;color:#666;width:100%;margin:0 20mm;display:flex;justify-content:space-between"><span>${policy}</span><span><span class="pageNumber"></span> / <span class="totalPages"></span></span></div>`,
+        margin: { top: '22mm', right: '23mm', bottom: '22mm', left: '23mm' },
+        headerTemplate: `<div style="font:9px 'Times New Roman',serif;color:#555;width:100%;margin:0 23mm;padding-bottom:5px;border-bottom:0.5px solid #aaa;display:flex;justify-content:space-between"><span>CSC369 · CPU Scheduling</span><span>${policy}</span></div>`,
+        footerTemplate: '<div style="font:10px \'Times New Roman\',serif;color:#333;width:100%;text-align:center"><span class="pageNumber"></span></div>',
       });
     } finally { await page.close(); }
     console.log(`Created docs/rules/${policy}_Rules.pdf`);

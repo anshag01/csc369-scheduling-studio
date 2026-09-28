@@ -1,28 +1,60 @@
-# RR — Round Robin
+# Round Robin (RR)
 
-One CPU, whole ticks, CPU-only processes. Service is the CPU work needed to finish. Switching processes costs no time.
+Round Robin gives each ready process a turn on the CPU. An unfinished process goes to the back of the queue when its turn ends.
 
-Quantum (time slice) is the maximum CPU time per turn. It must be a positive whole number; the default is 2 ticks.
+## 1. Service time and time slice
 
-## Rules
+The visualizer uses one CPU, whole ticks, and CPU-only processes. Switching processes takes no time.
 
-1. New arrivals join the back of one ready queue. Simultaneous arrivals keep input order.
-2. Dispatch the queue head with a fresh quantum. Each running tick uses one service tick and one quantum tick.
-3. A new arrival does not interrupt an ongoing turn.
-4. If the process finishes, remove it. **Completion wins** if it coincides with quantum expiry.
-5. If its quantum expires while unfinished, reset quantum usage and append it to the queue tail. Keep its remaining service.
-6. At simultaneous arrival and expiry, admit arrivals before requeueing the expired process. Existing waiting processes remain ahead of both.
-7. A lone process can expire and immediately run again with a fresh quantum. No tick is lost. If nobody is ready, wait for the next arrival; stop when all processes finish.
+**Service time** is the total CPU work a process needs to finish. The **quantum**, also called the **time slice**, limits how many CPU ticks it can use in one turn. The default quantum is 2; any positive whole number is allowed.
 
-## At a time boundary
+For example, a process needing five service ticks with a quantum of 2 needs turns of two, two, and one tick. Waiting between turns does not reduce its remaining service. RR has no separate allotment or priority levels.
 
-Complete the runner if finished → detect expiry → add arrivals → requeue expired work → dispatch if the CPU is free.
+## 2. Scheduling rules
 
-RR has no separate allotment, priority demotion, or boost.
+### Rule 1. Add arrivals to the queue tail
 
-## Example
+Existing waiting processes stay ahead of new arrivals. If several processes arrive together, add them in input order. If arrival and quantum expiry coincide, admit the arrivals before requeueing the unfinished process.
 
-Input order: A, B, C.
+### Rule 2. Give the queue head a fresh quantum
+
+When the CPU is free, remove the first ready process and set its quantum usage to zero. Each tick it runs reduces remaining service by one and increases quantum usage by one.
+
+An arriving process cannot interrupt a turn. It waits until the current process finishes or uses its quantum.
+
+### Rule 3. Complete before considering rotation
+
+If the process has no service left, remove it. This applies even when its last service tick also uses the last tick of its quantum. A finished process is never sent back to the queue.
+
+### Rule 4. Rotate an unfinished process when its quantum expires
+
+Reset its quantum usage and append it to the queue tail. Preserve its remaining service. If other processes are waiting, they run first.
+
+If the process is alone, it can immediately start another turn. Quantum expiry does not create an idle tick.
+
+### Rule 5. Idle only when no process is ready
+
+Wait for the next arrival if the CPU and ready queue are empty. Stop when all processes have finished.
+
+## 3. Events at a tick boundary
+
+After accounting for the preceding tick:
+
+1. Remove the running process if it has finished.
+2. If an unfinished process has used its quantum, mark its turn as ended.
+3. Add all arrivals at the current time.
+4. Append the process whose turn ended, if any, with quantum usage reset.
+5. If the CPU is free, dispatch the queue head.
+
+If the running process has neither finished nor exhausted its quantum, it continues. Dispatching or requeueing takes no CPU tick.
+
+For example, suppose A's turn ends while B is waiting and C arrives. Admit C, then append A. The queue becomes [B, C, A], with B next.
+
+## 4. Worked examples
+
+### Example 1. Full turns and early completion
+
+Input order is A, B, C. Use quantum 2. All times are in ticks.
 
 | Process | Arrival | Service |
 | --- | --- | --- |
@@ -30,8 +62,22 @@ Input order: A, B, C.
 | B | 1 | 2 |
 | C | 1 | 1 |
 
-With quantum 2, CPU: **A [0–2), B [2–4), C [4–5), A [5–7), A [7–8).**
+| From | To | CPU |
+| --- | --- | --- |
+| 0 | 2 | A |
+| 2 | 4 | B |
+| 4 | 5 | C |
+| 5 | 7 | A |
+| 7 | 8 | A |
 
-B finishes exactly at its quantum boundary. C finishes early. At time 7, A is alone and immediately starts a fresh turn.
+A's first turn ends at time 2, with three service ticks left. B then finishes exactly at its quantum boundary. C needs only one tick, so it releases the CPU at time 5 without using its full quantum. A runs from 5 to 7, then immediately takes another turn because nobody else is waiting. It finishes at time 8.
 
-**Arrival/expiry case:** A arrives at 0 needing four ticks; B arrives at 2 needing one. With quantum 2, the CPU sequence is `A A B A A`: B enters before A is requeued.
+The boundary at time 7 separates two turns of A, although A uses the CPU on both sides.
+
+### Example 2. Arrival at quantum expiry
+
+Let A arrive at time 0 needing four ticks, and B arrive at time 2 needing one. Keep quantum 2.
+
+The CPU runs A from time 0 to 2, B from 2 to 3, then A from 3 to 5.
+
+At time 2, B is admitted before A is requeued. The queue is [B, A], so B runs next. A resumes at time 3 with two service ticks left.
