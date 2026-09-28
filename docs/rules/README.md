@@ -1,6 +1,6 @@
-# Scheduling Studio: policy rules
+# Scheduling policy rules
 
-Each document describes the policy implemented in Scheduling Studio, with rules, explanations, examples, boundary ordering, metrics, and supported input limits. The PDFs are standalone documents suitable for sharing.
+Rules and short examples for the five implemented policies.
 
 | Policy | Read the source | Download PDF |
 | --- | --- | --- |
@@ -10,16 +10,8 @@ Each document describes the policy implemented in Scheduling Studio, with rules,
 | RR — Round Robin | [RR rules](../../RR_RULES.md) | [RR PDF](RR_Rules.pdf) |
 | MLFQ — Multilevel Feedback Queue | [MLFQ rules](../../MLFQ_RULES.md) | [MLFQ PDF](MLFQ_Rules.pdf) |
 
-FCFS, SJF, STCF, and RR use the same worked input so their behavior can be compared directly. MLFQ uses the loadable unequal-budget example to illustrate four one-tick turns before demotion. Worked CPU traces, completion boundaries, and final response/waiting/turnaround values were checked against `lib/simulator.ts`.
+FCFS, SJF, STCF, and RR use the same input for comparison. MLFQ includes separate-budget and boost examples.
 
-The documents describe current implementation choices. In particular, MLFQ handles expiry/requeue before a simultaneous boost. The source document retains the maintainer's clarification note; the shareable PDF contains the implemented rules without the instructor discussion.
+## Regenerate
 
-## Regenerate the PDFs
-
-Edit the root `*_RULES.md` sources, then run:
-
-```sh
-npm run docs:rules
-```
-
-The generator uses the project's existing Playwright dependency and requires Chromium (`npx playwright install chromium` on a fresh machine). It writes the five PDFs here and HTML previews under the ignored `outputs/policy-rules/` directory. Review the resulting pagination after changing a source document.
+Edit the root `*_RULES.md` files, then run `npm run docs:rules`. The generator uses Playwright Chromium (`npx playwright install chromium` if needed). Review pagination after editing.
