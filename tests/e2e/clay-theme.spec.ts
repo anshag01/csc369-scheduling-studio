@@ -18,7 +18,7 @@ async function readTextContrast(page: Page) {
       });
       return channels[0] * .2126 + channels[1] * .7152 + channels[2] * .0722;
     }
-    return [".field-label", ".play-button", ".metrics-toggle.active", ".policy-badge", ".cpu-queue-badge", ".state-pill.finished", ".tick-block", ".timeline-legend", ".completion-dock > i", ".boost-marker", ".event-list p > span", ".motion-cue", ".motion-cue span", ".queue-label em"].flatMap((selector) =>
+    return [".field-label", ".playback-controls button:not(:disabled)", ".metrics-toggle.active", ".policy-badge", ".cpu-queue-badge", ".state-pill.finished", ".tick-block", ".timeline-legend", ".completion-dock > i", ".boost-marker", ".event-list p > span", ".motion-cue", ".motion-cue span", ".queue-label em"].flatMap((selector) =>
       [...document.querySelectorAll<HTMLElement>(selector)].map((element) => {
         const foreground = luminance(getComputedStyle(element).color);
         let surface: HTMLElement = element;
@@ -58,7 +58,6 @@ test("Clay is the only theme, ignores saved palettes, and keeps text readable", 
     await expect(page.getByTestId("time-value")).toHaveText("6");
     expect(await readSurfaces()).toEqual(light);
     for (const pair of await readTextContrast(page)) expect(pair.ratio, pair.selector).toBeGreaterThanOrEqual(4.5);
-    for (const button of await page.locator(".playback-controls button:not(.play-button)").all()) await expect(button).toHaveCSS("background-color", "rgb(0, 0, 0)");
   }
   await page.reload();
   await expect(page.locator("html")).toHaveAttribute("data-palette", "clay");
