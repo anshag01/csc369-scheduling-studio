@@ -50,7 +50,7 @@ function wholeNumber(value: string, minimum: number) {
 }
 
 function mean(values: number[]) {
-  if (values.length === 0) return "—";
+  if (values.length === 0) return "-";
   const value = values.reduce((sum, item) => sum + item, 0) / values.length;
   return Number.isInteger(value) ? String(value) : value.toFixed(1);
 }
@@ -297,7 +297,7 @@ export default function SchedulingLab({
             </div>
             <label className="field-label" htmlFor="algorithm">Scheduling algorithm</label>
             <select id="algorithm" value={algorithm} onChange={(event) => { resetPlayback(); setAlgorithm(event.target.value as Algorithm); }}>
-              {(Object.keys(algorithms) as Algorithm[]).map((key) => <option key={key} value={key}>{algorithms[key].short} — {algorithms[key].name}</option>)}
+              {(Object.keys(algorithms) as Algorithm[]).map((key) => <option key={key} value={key}>{algorithms[key].short}: {algorithms[key].name}</option>)}
             </select>
             {algorithm === "rr" && <div className="inline-setting"><label htmlFor="quantum">Time quantum</label><div className="number-with-unit"><input id="quantum" aria-describedby="rr-quantum-help" type="number" min="1" value={quantum} onChange={(event) => { resetPlayback(); setQuantum(wholeNumber(event.target.value, 1)); }} /><span>ticks</span></div></div>}
             {algorithm === "rr" && <p className="budget-help" id="rr-quantum-help"><strong>Quantum (time slice):</strong> maximum CPU ticks per turn.</p>}
@@ -339,7 +339,7 @@ export default function SchedulingLab({
               <button className="play-button" onClick={() => { if (!playing && step >= lastStep) goToStep(0, false); setPlaying((current) => !current); }} disabled={!snapshot || (motionBusy && !playing)} aria-label={playing ? "Pause simulation" : "Play simulation"}>{playing ? "Ⅱ" : "▶"}</button>
               <button onClick={() => { setPlaying(false); goToStep(stepRef.current + 1); }} disabled={!snapshot || step === lastStep || motionBusy} aria-label="Next time step">→</button>
             </div>
-            <div className="time-readout"><span>TIME</span><strong data-testid="time-value">{snapshot?.time ?? "—"}</strong><span>/ {lastStep}</span></div>
+            <div className="time-readout"><span>TIME</span><strong data-testid="time-value">{snapshot?.time ?? "-"}</strong><span>/ {lastStep}</span></div>
             <div className="motion-cue-slot">
               {motionCue && <div className="motion-cue" role="status" aria-live="polite"><span>MOVING</span><strong>{motionCue}</strong></div>}
               {motionSteps.length > 0 && <details className="movement-review" key={`${motionContext}:${step}`} onToggle={(event) => { if (event.currentTarget.open) setPlaying(false); }}>
@@ -390,7 +390,7 @@ export default function SchedulingLab({
                     </table>}
                     {algorithm === "rr" && <small>{runningView.quantumUsed}/{quantum} quantum used</small>}
                   </div>
-                </div> : <div className="idle-content" data-motion-cpu-target><div className="process-orb idle">—</div><div><p>Nothing dispatched</p><h2>CPU idle</h2><span>Waiting for work</span></div></div>}
+                </div> : <div className="idle-content" data-motion-cpu-target><div className="process-orb idle">○</div><div><p>Nothing dispatched</p><h2>CPU idle</h2><span>Waiting for work</span></div></div>}
                 <div className="completion-dock" data-testid="completion-dock" data-motion-finish-target data-completed-count={completedCount} aria-label={`${completedCount} completed process${completedCount === 1 ? "" : "es"}`}><i aria-hidden="true">✓</i><span><small>COMPLETED</small><strong>{completedCount}</strong></span></div>
                 <div className="cpu-progress"><span style={{ width: runningProcess ? `${((runningProcess.serviceTime - (displayState?.runningRemaining ?? 0)) / runningProcess.serviceTime) * 100}%` : "0%", background: runningProcess?.color }} /></div>
               </article>
@@ -435,7 +435,7 @@ export default function SchedulingLab({
               <div className="timeline-legend">{processes.map((process) => <span key={process.id}><i style={{ background: process.color }} />{process.id}</span>)}<span><i className="idle-swatch" />Idle</span></div>
             </section>
 
-            {showMetrics && <section className="metrics-section card-surface"><div className="card-title-row"><div><p className="eyebrow">PROCESS ACCOUNTING</p><h2>State & metrics</h2></div><div className="metric-summary" title={`${completedCount} of ${processes.length} processes complete`}><span><small>AVG W</small><strong>{averageWaiting}</strong></span><span><small>AVG R</small><strong>{averageResponse}</strong></span><span><small>AVG T</small><strong>{averageTurnaround}</strong></span></div></div><div className="metrics-scroll"><table><thead><tr><th>Process</th><th>State</th><th>CPU service left</th>{algorithm === "mlfq" && <><th>Quantum left</th><th>Allotment left</th></>}<th>Waiting</th><th>Response</th><th>Turnaround</th></tr></thead><tbody>{displayState?.processes.map((process) => <tr key={process.id} data-process-id={process.id} data-state={process.state} data-remaining={process.remainingTime} data-queue-level={algorithm === "mlfq" ? process.queueLevel : undefined} data-quantum-used={algorithm === "mlfq" ? process.quantumUsed : undefined} data-allotment-used={algorithm === "mlfq" ? process.allotmentUsed : undefined}><td><i style={{ background: process.color }} />{process.id}</td><td><span className={`state-pill ${process.state}`}>{process.state}</span></td><td>{process.remainingTime}</td>{algorithm === "mlfq" && <><td>{process.state === "finished" ? "—" : mlfqQuanta[process.queueLevel] - process.quantumUsed}</td><td>{process.state === "finished" ? "—" : mlfqAllotments[process.queueLevel] - process.allotmentUsed}</td></>}<td>{process.waitingTime}</td><td>{process.responseTime ?? "—"}</td><td>{process.turnaroundTime ?? "—"}</td></tr>)}</tbody></table></div></section>}
+            {showMetrics && <section className="metrics-section card-surface"><div className="card-title-row"><div><p className="eyebrow">PROCESS ACCOUNTING</p><h2>State & metrics</h2></div><div className="metric-summary" title={`${completedCount} of ${processes.length} processes complete`}><span><small>AVG W</small><strong>{averageWaiting}</strong></span><span><small>AVG R</small><strong>{averageResponse}</strong></span><span><small>AVG T</small><strong>{averageTurnaround}</strong></span></div></div><div className="metrics-scroll"><table><thead><tr><th>Process</th><th>State</th><th>CPU service left</th>{algorithm === "mlfq" && <><th>Quantum left</th><th>Allotment left</th></>}<th>Waiting</th><th>Response</th><th>Turnaround</th></tr></thead><tbody>{displayState?.processes.map((process) => <tr key={process.id} data-process-id={process.id} data-state={process.state} data-remaining={process.remainingTime} data-queue-level={algorithm === "mlfq" ? process.queueLevel : undefined} data-quantum-used={algorithm === "mlfq" ? process.quantumUsed : undefined} data-allotment-used={algorithm === "mlfq" ? process.allotmentUsed : undefined}><td><i style={{ background: process.color }} />{process.id}</td><td><span className={`state-pill ${process.state}`}>{process.state}</span></td><td>{process.remainingTime}</td>{algorithm === "mlfq" && <><td>{process.state === "finished" ? "-" : mlfqQuanta[process.queueLevel] - process.quantumUsed}</td><td>{process.state === "finished" ? "-" : mlfqAllotments[process.queueLevel] - process.allotmentUsed}</td></>}<td>{process.waitingTime}</td><td>{process.responseTime ?? "-"}</td><td>{process.turnaroundTime ?? "-"}</td></tr>)}</tbody></table></div></section>}
             </div>
           </>}
         </section>

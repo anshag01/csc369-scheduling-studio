@@ -40,11 +40,11 @@ export function expectedBoundaries(scenario: Scenario): Boundary[] {
     frames.push({
       time, cpu: runner?.id ?? null, queues: queues.map(q => q.map(id => jobs[id].id)),
       rows: jobs.map((p, id) => [p.id, state(id), String(p.serviceTime-p.work),
-        p.done !== null ? '—' : String(scenario.quanta[p.level]-p.turn),
-        p.done !== null ? '—' : String(scenario.allotments[p.level]-p.spent),
+        p.done !== null ? '-' : String(scenario.quanta[p.level]-p.turn),
+        p.done !== null ? '-' : String(scenario.allotments[p.level]-p.spent),
         String(Math.max(0,(p.done ?? time)-p.arrivalTime)-p.work),
-        p.first === null ? '—' : String(p.first-p.arrivalTime),
-        p.done === null ? '—' : String(p.done-p.arrivalTime)]),
+        p.first === null ? '-' : String(p.first-p.arrivalTime),
+        p.done === null ? '-' : String(p.done-p.arrivalTime)]),
       budgets: runner ? [
         ['Quantum', `${runner.turn}/${scenario.quanta[runner.level]}`, String(scenario.quanta[runner.level]-runner.turn)],
         ['Allotment', `${runner.spent}/${scenario.allotments[runner.level]}`, String(scenario.allotments[runner.level]-runner.spent)],
