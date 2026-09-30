@@ -23,5 +23,5 @@ export const metadata: Metadata = {
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
-  return <html lang="en"><body className={`${manrope.variable} ${dmMono.variable}`}>{children}</body></html>;
+  return <html lang="en" data-palette="clay"><body className={`${manrope.variable} ${dmMono.variable}`}>{children}</body></html>;
 }

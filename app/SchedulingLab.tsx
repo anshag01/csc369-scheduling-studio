@@ -4,7 +4,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Algorithm, ProcessDefinition, SchedulerVisualState, simulate, validateProcesses, validateSimulationConfig } from "../lib/simulator";
 import { useTypedProcessMotion } from "./useTypedProcessMotion";
 
-const palette = ["#4f6bed", "#8e63ce", "#d18b38", "#d15f5f", "#328ea8", "#667085"];
+// Mist blue, sage, champagne, rose, silver, and soft lavender finishes.
+const palette = ["#accaea", "#c4d5bf", "#ded2be", "#dfc4d1", "#cbd2dc", "#d1c9e3"];
 const exampleProcesses: ProcessDefinition[] = [
   { id: "A", arrivalTime: 0, serviceTime: 3, color: palette[0] },
   { id: "B", arrivalTime: 2, serviceTime: 6, color: palette[1] },
@@ -426,7 +427,7 @@ export default function SchedulingLab({
                   aria-label={`Time ${slice.time}: ${slice.processId ? `process ${slice.processId}` : "idle"}${isBoostBoundary ? "; priority boost" : ""}`}
                 >
                   <span className="tick-label">{slice.time}</span>
-                  <span className="tick-block" style={{ background: process?.color ?? "#cbd0d8" }}>
+                  <span className="tick-block" style={{ "--process-color": process?.color ?? "var(--idle)", "--process-ink": process && palette.includes(process.color) ? "#24313f" : "#ffffff" } as React.CSSProperties}>
                     {slice.processId ?? "idle"}
                   </span>
                   {isBoostBoundary && <span className="boost-marker" aria-hidden="true">BOOST</span>}

@@ -599,8 +599,6 @@ test("short desktop windows keep the enlarged timeline and boost flag inside the
       });
     });
     expect(fits).toBe(true);
-    if (height >= 660) {
-      expect(await page.locator(".simulation-panel").evaluate((panel) => panel.scrollHeight <= panel.clientHeight)).toBe(true);
-    }
+    expect(await page.locator(".simulation-panel").evaluate((panel) => panel.scrollHeight <= panel.clientHeight)).toBe(true);
   }
 });
