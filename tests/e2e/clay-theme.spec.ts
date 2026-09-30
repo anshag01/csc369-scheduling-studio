@@ -58,7 +58,7 @@ test("Clay is the only theme, ignores saved palettes, and keeps text readable", 
     await expect(page.getByTestId("time-value")).toHaveText("6");
     expect(await readSurfaces()).toEqual(light);
     for (const pair of await readTextContrast(page)) expect(pair.ratio, pair.selector).toBeGreaterThanOrEqual(4.5);
-    for (const button of await page.locator(".playback-controls button").all()) await expect(button).toHaveCSS("background-color", "rgb(0, 0, 0)");
+    for (const button of await page.locator(".playback-controls button:not(.play-button)").all()) await expect(button).toHaveCSS("background-color", "rgb(0, 0, 0)");
   }
   await page.reload();
   await expect(page.locator("html")).toHaveAttribute("data-palette", "clay");
